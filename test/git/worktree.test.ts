@@ -1,0 +1,227 @@
+import { test, expect, describe, beforeEach, afterEach } from "bun:test";
+import {
+  detectRepo,
+  createWorktree,
+  finalizeWorktree,
+  removeWorktree,
+} from "../../src/git/worktree";
+import { generateTaskId, dataDir } from "../../src/task";
+import { mkdtemp, rm, mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+/**
+ * Create a bare-bones git repo with an initial commit and an origin remote
+ * pointing at a bare repo (so push works locally).
+ */
+async function createTestRepo(dir: string): Promise<{
+  repoPath: string;
+  barePath: string;
+}> {
+  const barePath = join(dir, "bare.git");
+  const repoPath = join(dir, "repo");
+
+  // Create a bare repo with "main" as the default branch
+  await Bun.$`git init --bare --initial-branch=main ${barePath}`.quiet();
+
+  // Clone it to get a working repo with origin set up
+  await Bun.$`git clone ${barePath} ${repoPath}`.quiet();
+
+  // Configure user for commits in this repo
+  await Bun.$`git -C ${repoPath} config user.email "test@deer.dev"`.quiet();
+  await Bun.$`git -C ${repoPath} config user.name "Deer Test"`.quiet();
+
+  // Create an initial commit so we have a branch
+  await Bun.$`git -C ${repoPath} checkout -b main`.quiet();
+  await Bun.$`git -C ${repoPath} commit --allow-empty -m "initial commit"`.quiet();
+  await Bun.$`git -C ${repoPath} push -u origin main`.quiet();
+
+  return { repoPath, barePath };
+}
+
+describe("detectRepo", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "deer-git-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  test("finds .git walking up from subdirectory", async () => {
+    const { repoPath, barePath } = await createTestRepo(tmpDir);
+    const subDir = join(repoPath, "src", "deep", "nested");
+    await mkdir(subDir, { recursive: true });
+
+    const result = await detectRepo(subDir);
+
+    expect(result.repoPath).toBe(repoPath);
+    expect(result.defaultBranch).toBe("main");
+    // Remote should contain the bare path
+    expect(result.remote).toContain(barePath);
+  });
+
+  test("finds .git from repo root directly", async () => {
+    const { repoPath } = await createTestRepo(tmpDir);
+
+    const result = await detectRepo(repoPath);
+    expect(result.repoPath).toBe(repoPath);
+  });
+
+  test("errors when not in a git repo", async () => {
+    const noGitDir = join(tmpDir, "no-git");
+    await mkdir(noGitDir, { recursive: true });
+
+    expect(detectRepo(noGitDir)).rejects.toThrow();
+  });
+});
+
+describe("createWorktree", () => {
+  let tmpDir: string;
+  const createdWorktrees: Array<{ repoPath: string; worktreePath: string }> = [];
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "deer-wt-test-"));
+    createdWorktrees.length = 0;
+  });
+
+  afterEach(async () => {
+    // Clean up worktrees from the real dataDir
+    for (const wt of createdWorktrees) {
+      await Bun.$`git -C ${wt.repoPath} worktree remove ${wt.worktreePath} --force`
+        .quiet()
+        .nothrow();
+      const taskDir = join(wt.worktreePath, "..");
+      await rm(taskDir, { recursive: true, force: true });
+    }
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  test("creates directory and git worktree", async () => {
+    const { repoPath } = await createTestRepo(tmpDir);
+    const taskId = generateTaskId();
+
+    const info = await createWorktree(repoPath, taskId, "main");
+    createdWorktrees.push({ repoPath, worktreePath: info.worktreePath });
+
+    // Worktree directory should exist
+    expect(await Bun.file(join(info.worktreePath, ".git")).exists()).toBe(true);
+
+    // Branch should be checked out
+    const branch =
+      await Bun.$`git -C ${info.worktreePath} rev-parse --abbrev-ref HEAD`.text();
+    expect(branch.trim()).toBe(`deer/${taskId}`);
+  });
+
+  test("branch name follows deer/<taskId> convention", async () => {
+    const { repoPath } = await createTestRepo(tmpDir);
+    const taskId = generateTaskId();
+
+    const info = await createWorktree(repoPath, taskId, "main");
+    createdWorktrees.push({ repoPath, worktreePath: info.worktreePath });
+
+    expect(info.branch).toBe(`deer/${taskId}`);
+  });
+
+  test("worktree path is under dataDir/tasks/<taskId>/worktree", async () => {
+    const { repoPath } = await createTestRepo(tmpDir);
+    const taskId = generateTaskId();
+
+    const info = await createWorktree(repoPath, taskId, "main");
+    createdWorktrees.push({ repoPath, worktreePath: info.worktreePath });
+
+    expect(info.worktreePath).toContain(taskId);
+    expect(info.worktreePath).toEndWith("/worktree");
+    expect(info.worktreePath).toStartWith(dataDir());
+  });
+});
+
+describe("finalizeWorktree", () => {
+  let tmpDir: string;
+  const createdWorktrees: Array<{ repoPath: string; worktreePath: string }> = [];
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "deer-fin-test-"));
+    createdWorktrees.length = 0;
+  });
+
+  afterEach(async () => {
+    for (const wt of createdWorktrees) {
+      await Bun.$`git -C ${wt.repoPath} worktree remove ${wt.worktreePath} --force`
+        .quiet()
+        .nothrow();
+      const taskDir = join(wt.worktreePath, "..");
+      await rm(taskDir, { recursive: true, force: true });
+    }
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  test("commits and pushes changes", async () => {
+    const { repoPath } = await createTestRepo(tmpDir);
+    const taskId = generateTaskId();
+    const info = await createWorktree(repoPath, taskId, "main");
+    createdWorktrees.push({ repoPath, worktreePath: info.worktreePath });
+
+    // Configure committer in worktree
+    await Bun.$`git -C ${info.worktreePath} config user.email "test@deer.dev"`.quiet();
+    await Bun.$`git -C ${info.worktreePath} config user.name "Deer Test"`.quiet();
+
+    // Create a new file in the worktree
+    await Bun.write(join(info.worktreePath, "new-file.txt"), "hello");
+
+    await finalizeWorktree(info.worktreePath);
+
+    // Verify the commit exists
+    const log =
+      await Bun.$`git -C ${info.worktreePath} log --oneline -1`.text();
+    expect(log).toContain("deer");
+  });
+
+  test("is a no-op when there are no changes", async () => {
+    const { repoPath } = await createTestRepo(tmpDir);
+    const taskId = generateTaskId();
+    const info = await createWorktree(repoPath, taskId, "main");
+    createdWorktrees.push({ repoPath, worktreePath: info.worktreePath });
+
+    // Should not throw
+    await finalizeWorktree(info.worktreePath);
+
+    // Log should only have the initial commit
+    const log =
+      await Bun.$`git -C ${info.worktreePath} log --oneline`.text();
+    expect(log.trim().split("\n")).toHaveLength(1);
+  });
+});
+
+describe("removeWorktree", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "deer-rm-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  test("cleans up worktree directory", async () => {
+    const { repoPath } = await createTestRepo(tmpDir);
+    const taskId = generateTaskId();
+    const info = await createWorktree(repoPath, taskId, "main");
+
+    // Worktree exists
+    expect(await Bun.file(join(info.worktreePath, ".git")).exists()).toBe(true);
+
+    await removeWorktree(repoPath, info.worktreePath);
+
+    // Worktree directory should be gone
+    const exists = await Bun.file(join(info.worktreePath, ".git")).exists();
+    expect(exists).toBe(false);
+
+    // Clean up the task directory
+    const taskDir = join(info.worktreePath, "..");
+    await rm(taskDir, { recursive: true, force: true });
+  });
+});
