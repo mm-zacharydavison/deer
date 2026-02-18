@@ -1,0 +1,21 @@
+{
+  "name": "deer",
+  "version": "0.1.0",
+  "description": "Unattended coding agent.",
+  "type": "module",
+  "bin": {
+    "deer": "src/cli.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "dev": "bun run src/cli.ts"
+  },
+  "dependencies": {
+    "@iarna/toml": "^3.0.0",
+    "dockerode": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.0",
+    "bun-types": "latest"
+  }
+}

@@ -1,0 +1,17 @@
+# deer.toml — Repo-local configuration for deer
+# Place this file in your repository root. It is safe to commit.
+
+# Override the default base branch for this repo
+# base_branch = "master"
+
+# Command to run inside the container before the agent starts
+# setup_command = "pnpm run setup"
+
+# Additional domains to allow through the network proxy (merged with global allowlist)
+# [network]
+# allowlist_extra = ["npm.pkg.github.com", "your-registry.example.com"]
+
+# Environment variables injected into the agent container
+# [env]
+# NODE_ENV = "development"
+# GITHUB_NPM_TOKEN = "ghp_..."
