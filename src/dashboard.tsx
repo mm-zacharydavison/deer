@@ -747,11 +747,14 @@ export default function Dashboard({ cwd }: { cwd: string }) {
       );
       if (toCheck.length === 0) return;
 
+      const results = await Promise.all(
+        toCheck.map((agent) => checkPrState(agent.result!.prUrl)),
+      );
       let changed = false;
-      for (const agent of toCheck) {
-        const state = await checkPrState(agent.result!.prUrl);
-        if (state !== null && state !== agent.prState) {
-          agent.prState = state;
+      for (let i = 0; i < toCheck.length; i++) {
+        const state = results[i];
+        if (state !== null && state !== toCheck[i].prState) {
+          toCheck[i].prState = state;
           changed = true;
         }
       }
