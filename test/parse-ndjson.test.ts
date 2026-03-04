@@ -1,28 +1,14 @@
 import { test, expect, describe } from "bun:test";
-import { parseNdjsonLine, type AgentState } from "../src/dashboard";
+import { parseNdjsonLine, createAgentState, type AgentState } from "../src/dashboard";
 
 function makeAgent(overrides: Partial<AgentState> = {}): AgentState {
-  return {
+  return createAgentState({
     id: 1,
     taskId: "deer_test",
     prompt: "test",
     status: "running",
-    elapsed: 0,
-    lastActivity: "",
-    currentTool: "",
-    logs: [],
-    meta: null,
-    result: null,
-    error: "",
-    proc: null,
-    timer: null,
-    prState: null,
-    needsAttention: false,
-    transcript: [],
-    transcriptPath: null,
-    historical: false,
     ...overrides,
-  };
+  });
 }
 
 // ── existing parsing behavior ───────────────────────────────────────

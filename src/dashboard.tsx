@@ -115,6 +115,80 @@ function isActive(a: AgentState): boolean {
   return a.status === "setup" || a.status === "running" || a.status === "teardown";
 }
 
+/** Suspend the ink alternate screen, run fn, then restore. */
+async function withSuspendedTerminal(
+  setSuspended: (v: boolean) => void,
+  fn: () => Promise<void>,
+): Promise<void> {
+  setSuspended(true);
+  process.stdout.write("\x1b[?1049l");
+  if (process.stdin.setRawMode) process.stdin.setRawMode(false);
+  try {
+    await fn();
+  } finally {
+    if (process.stdin.setRawMode) process.stdin.setRawMode(true);
+    process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
+    setSuspended(false);
+  }
+}
+
+/** Spawn a bash script, check exit code, parse JSON from last stdout line. */
+async function runScriptJson<T>(args: string[], cwd: string): Promise<T> {
+  const proc = Bun.spawn(args, { cwd, stdout: "pipe", stderr: "pipe" });
+  const code = await proc.exited;
+  if (code !== 0) {
+    const stderr = await new Response(proc.stderr).text();
+    throw new Error(`Script failed (exit ${code}): ${stderr.trim().split("\n").pop()}`);
+  }
+  const stdout = await new Response(proc.stdout).text();
+  const lines = stdout.trim().split("\n").filter(Boolean);
+  const jsonLine = lines[lines.length - 1];
+  if (!jsonLine) throw new Error("Script produced no output");
+  return JSON.parse(jsonLine) as T;
+}
+
+/** Spawn claude -p inside a docker sandbox with OAuth env. */
+function spawnClaudeInSandbox(meta: SandboxMeta, promptPath: string): ReturnType<typeof Bun.spawn> {
+  return Bun.spawn([
+    "docker", "sandbox", "exec", "--privileged", meta.sandboxName,
+    "env", "-u", "ANTHROPIC_API_KEY",
+    `CLAUDE_CODE_OAUTH_TOKEN=${process.env.CLAUDE_CODE_OAUTH_TOKEN}`,
+    "sh", "-c",
+    `cd ${meta.worktreePath} && cat ${promptPath} | claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model ${MODEL}`,
+  ], { stdout: "pipe", stderr: "pipe" });
+}
+
+function prStateColor(state: "open" | "merged" | "closed" | null): string {
+  if (state === "merged") return "magenta";
+  if (state === "closed") return "red";
+  return "green";
+}
+
+/** Factory for AgentState with sensible defaults. */
+export function createAgentState(overrides: Partial<AgentState>): AgentState {
+  return {
+    id: 0,
+    taskId: "",
+    prompt: "",
+    status: "setup",
+    elapsed: 0,
+    lastActivity: "",
+    currentTool: "",
+    logs: [],
+    meta: null,
+    result: null,
+    error: "",
+    proc: null,
+    timer: null,
+    prState: null,
+    needsAttention: false,
+    transcript: [],
+    transcriptPath: null,
+    historical: false,
+    ...overrides,
+  };
+}
+
 /** Strip ANSI escape sequences from terminal output */
 export function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
@@ -296,25 +370,7 @@ async function runPreflight(): Promise<PreflightResult> {
 async function setupAgent(cwd: string, baseBranch?: string): Promise<SandboxMeta> {
   const args = ["bash", join(SCRIPTS_DIR, "setup-sandbox.sh"), cwd, MODEL];
   if (baseBranch) args.push(baseBranch);
-
-  const proc = Bun.spawn(args, {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env },
-  });
-
-  const code = await proc.exited;
-  if (code !== 0) {
-    const stderr = await new Response(proc.stderr).text();
-    throw new Error(`Setup failed (exit ${code}): ${stderr.trim().split("\n").pop()}`);
-  }
-
-  const stdout = await new Response(proc.stdout).text();
-  const lines = stdout.trim().split("\n").filter(Boolean);
-  const jsonLine = lines[lines.length - 1];
-  if (!jsonLine) throw new Error("Setup produced no output");
-  return JSON.parse(jsonLine) as SandboxMeta;
+  return runScriptJson<SandboxMeta>(args, cwd);
 }
 
 /**
@@ -338,18 +394,25 @@ async function applyNetworkPolicy(sandboxName: string, allowlist: string[]): Pro
 
 /**
  * Start Claude inside a tmux session in the sandbox.
- * Claude runs as the initial process of the tmux session; when it exits,
- * remain-on-exit keeps the pane alive so we can capture scrollback.
+ * Creates the session first, sets remain-on-exit (so the pane survives for
+ * scrollback capture), then sends the command via send-keys so the tmux
+ * shell inherits the exported CLAUDE_CODE_OAUTH_TOKEN.
  */
 async function startClaudeInTmux(meta: SandboxMeta, prompt: string): Promise<void> {
   const promptPath = join(meta.deerTmpDir, ".agent-prompt");
   await Bun.write(promptPath, prompt);
 
+  // 1. Create session + set remain-on-exit BEFORE the command runs (no race)
+  // 2. send-keys exports the token inside the tmux shell — tmux new-session
+  //    starts a fresh shell that does NOT inherit env from the creating process.
+  // 3. Unset ANTHROPIC_API_KEY so Claude uses OAuth, not API key billing.
+  // 4. "; exit" ensures the shell exits when Claude finishes → pane dies.
   const script = [
     `export PATH="$PATH:/usr/bin:/usr/local/bin:/bin"`,
     `export TERM=xterm-256color`,
-    `tmux new-session -d -s deer "cd ${meta.worktreePath} && cat ${meta.deerTmpDir}/.agent-prompt | claude -p --verbose --dangerously-skip-permissions --model ${MODEL}"`,
+    `tmux new-session -d -s deer`,
     `tmux set -t deer remain-on-exit on`,
+    `tmux send-keys -t deer "unset ANTHROPIC_API_KEY; export CLAUDE_CODE_OAUTH_TOKEN='$CLAUDE_CODE_OAUTH_TOKEN' && cd ${meta.worktreePath} && cat ${meta.deerTmpDir}/.agent-prompt | claude -p --verbose --dangerously-skip-permissions --model ${MODEL}; exit" Enter`,
   ].join(" && ");
 
   const proc = Bun.spawn([
@@ -360,7 +423,6 @@ async function startClaudeInTmux(meta: SandboxMeta, prompt: string): Promise<voi
   ], {
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env },
   });
 
   const code = await proc.exited;
@@ -454,17 +516,7 @@ async function startClaudeMetadata(meta: SandboxMeta, agent: AgentState): Promis
   const promptPath = join(meta.deerTmpDir, ".agent-metadata-prompt");
   await Bun.write(promptPath, prompt);
 
-  const proc = Bun.spawn([
-    "docker", "sandbox", "exec", "--privileged", meta.sandboxName,
-    "env", "-u", "ANTHROPIC_API_KEY",
-    `CLAUDE_CODE_OAUTH_TOKEN=${process.env.CLAUDE_CODE_OAUTH_TOKEN}`,
-    "sh", "-c",
-    `cd ${meta.worktreePath} && cat ${meta.deerTmpDir}/.agent-metadata-prompt | claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model ${MODEL}`,
-  ], {
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env },
-  });
+  const proc = spawnClaudeInSandbox(meta, `${meta.deerTmpDir}/.agent-metadata-prompt`);
 
   // Drain stdout/stderr to prevent backpressure
   const stdoutPromise = new Response(proc.stdout).text();
@@ -497,28 +549,10 @@ async function startClaudeMetadata(meta: SandboxMeta, agent: AgentState): Promis
 }
 
 async function teardownAgent(meta: SandboxMeta, cwd: string): Promise<TeardownResult> {
-  const proc = Bun.spawn([
+  return runScriptJson<TeardownResult>([
     "bash", join(SCRIPTS_DIR, "teardown-sandbox.sh"),
     cwd, meta.worktreePath, meta.sandboxName, meta.tempBranch, meta.baseBranch, meta.model, meta.deerTmpDir,
-  ], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: { ...process.env },
-  });
-
-  const code = await proc.exited;
-  const stdout = await new Response(proc.stdout).text();
-
-  if (code !== 0) {
-    const stderr = await new Response(proc.stderr).text();
-    throw new Error(`Teardown failed (exit ${code}): ${stderr.trim().split("\n").pop()}`);
-  }
-
-  const lines = stdout.trim().split("\n").filter(Boolean);
-  const jsonLine = lines[lines.length - 1];
-  if (!jsonLine) throw new Error("Teardown produced no output");
-  return JSON.parse(jsonLine) as TeardownResult;
+  ], cwd);
 }
 
 function cleanupAgent(agent: AgentState, repoRoot: string) {
@@ -697,26 +731,18 @@ async function saveToHistory(agent: AgentState, repoPath: string): Promise<void>
 /** Convert a persisted task to a read-only AgentState for display. */
 function historicalAgent(task: PersistedTask, id: number): AgentState {
   const wasInterrupted = task.status === "running";
-  return {
+  return createAgentState({
     id,
     taskId: task.taskId,
     prompt: task.prompt,
     status: wasInterrupted ? "interrupted" : task.status,
     elapsed: task.elapsed,
     lastActivity: wasInterrupted ? "Interrupted — deer was closed" : task.lastActivity,
-    currentTool: "",
-    logs: [],
-    meta: null,
     result: task.prUrl ? { finalBranch: task.finalBranch ?? "", prUrl: task.prUrl } : null,
     error: task.error || "",
-    proc: null,
-    timer: null,
-    prState: null,
-    needsAttention: false,
-    transcript: [],
     transcriptPath: task.transcriptPath,
     historical: true,
-  };
+  });
 }
 
 // ── Main Component ───────────────────────────────────────────────────
@@ -849,26 +875,11 @@ export default function Dashboard({ cwd }: { cwd: string }) {
     if (preflight && !preflight.ok) return;
 
     const id = nextId.current++;
-    const agent: AgentState = {
+    const agent = createAgentState({
       id,
       taskId: generateTaskId(),
       prompt: prompt.trim(),
-      status: "setup",
-      elapsed: 0,
-      lastActivity: "",
-      currentTool: "",
-      logs: [],
-      meta: null,
-      result: null,
-      error: "",
-      proc: null,
-      timer: null,
-      prState: null,
-      needsAttention: false,
-      transcript: [],
-      transcriptPath: null,
-      historical: false,
-    };
+    });
 
     // Start elapsed timer
     agent.timer = setInterval(() => {
@@ -1001,68 +1012,47 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   const shellIntoAgent = useCallback(async (agent: AgentState) => {
     if (!agent.meta) return;
 
-    setSuspended(true);
+    await withSuspendedTerminal(setSuspended, async () => {
+      const tmuxScript = [
+        `export PATH="$PATH:/usr/bin:/usr/local/bin:/bin"`,
+        `export TERM=xterm-256color`,
+        `if ! command -v tmux >/dev/null 2>&1; then`,
+        `  echo "ERROR: tmux is not installed in the sandbox. Shell requires tmux." >&2`,
+        `  exit 1`,
+        `fi`,
+        `if ! tmux has-session -t deer-shell 2>/dev/null; then`,
+        `  tmux new-session -d -s deer-shell -c ${agent.meta!.worktreePath}`,
+        `fi`,
+        `tmux set -t deer-shell status on`,
+        `tmux set -t deer-shell status-position bottom`,
+        `tmux set -t deer-shell status-style 'bg=#313244,fg=#cdd6f4'`,
+        `tmux set -t deer-shell status-left ' Ctrl+b d = detach (return to deer) '`,
+        `tmux set -t deer-shell status-left-length 50`,
+        `tmux set -t deer-shell status-right ''`,
+        `tmux set -t deer-shell focus-events off`,
+        `tmux attach -t deer-shell`,
+      ].join("\n");
 
-    // Leave alternate screen and release raw mode
-    process.stdout.write("\x1b[?1049l");
-    if (process.stdin.setRawMode) process.stdin.setRawMode(false);
-
-    const tmuxScript = [
-      `export PATH="$PATH:/usr/bin:/usr/local/bin:/bin"`,
-      `export TERM=xterm-256color`,
-      `if ! command -v tmux >/dev/null 2>&1; then`,
-      `  echo "ERROR: tmux is not installed in the sandbox. Shell requires tmux." >&2`,
-      `  exit 1`,
-      `fi`,
-      `if ! tmux has-session -t deer-shell 2>/dev/null; then`,
-      `  tmux new-session -d -s deer-shell -c ${agent.meta.worktreePath}`,
-      `fi`,
-      `tmux set -t deer-shell status on`,
-      `tmux set -t deer-shell status-position bottom`,
-      `tmux set -t deer-shell status-style 'bg=#313244,fg=#cdd6f4'`,
-      `tmux set -t deer-shell status-left ' Ctrl+b d = detach (return to deer) '`,
-      `tmux set -t deer-shell status-left-length 50`,
-      `tmux set -t deer-shell status-right ''`,
-      `tmux set -t deer-shell focus-events off`,
-      `tmux attach -t deer-shell`,
-    ].join("\n");
-
-    const proc = Bun.spawn([
-      "docker", "sandbox", "exec", "-it", agent.meta.sandboxName,
-      "sh", "-c", tmuxScript,
-    ], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
-    await proc.exited;
-
-    // Restore alternate screen and raw mode
-    if (process.stdin.setRawMode) process.stdin.setRawMode(true);
-    process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
-
-    setSuspended(false);
+      const proc = Bun.spawn([
+        "docker", "sandbox", "exec", "-it", agent.meta!.sandboxName,
+        "sh", "-c", tmuxScript,
+      ], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+      await proc.exited;
+    });
   }, []);
 
   // ── Open transcript in editor ───────────────────────────────────
 
   const openInEditor = useCallback(async (filePath: string) => {
     const editor = process.env.EDITOR || "vim";
-
-    setSuspended(true);
-
-    // Leave alternate screen and release raw mode
-    process.stdout.write("\x1b[?1049l");
-    if (process.stdin.setRawMode) process.stdin.setRawMode(false);
-
-    const proc = Bun.spawn([editor, filePath], {
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
+    await withSuspendedTerminal(setSuspended, async () => {
+      const proc = Bun.spawn([editor, filePath], {
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      await proc.exited;
     });
-    await proc.exited;
-
-    // Restore alternate screen and raw mode
-    if (process.stdin.setRawMode) process.stdin.setRawMode(true);
-    process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
-
-    setSuspended(false);
   }, []);
 
   // ── Continue: focus input to spawn a new agent off a PR branch ───
@@ -1081,41 +1071,32 @@ export default function Dashboard({ cwd }: { cwd: string }) {
 
     agent.needsAttention = false;
 
-    setSuspended(true);
+    await withSuspendedTerminal(setSuspended, async () => {
+      const tmuxScript = [
+        `export PATH="$PATH:/usr/bin:/usr/local/bin:/bin"`,
+        `export TERM=xterm-256color`,
+        `tmux set -t deer status on`,
+        `tmux set -t deer status-position bottom`,
+        `tmux set -t deer status-style 'bg=#313244,fg=#cdd6f4'`,
+        `tmux set -t deer status-left ' Ctrl+b d = detach (return to deer) | Ctrl+b [ = scroll (q exits) '`,
+        `tmux set -t deer status-left-length 80`,
+        `tmux set -t deer status-right ''`,
+        `tmux set -t deer focus-events off`,
+        `tmux attach -t deer`,
+      ].join("\n");
 
-    // Leave alternate screen and release raw mode
-    process.stdout.write("\x1b[?1049l");
-    if (process.stdin.setRawMode) process.stdin.setRawMode(false);
-
-    const tmuxScript = [
-      `export PATH="$PATH:/usr/bin:/usr/local/bin:/bin"`,
-      `export TERM=xterm-256color`,
-      `tmux set -t deer status on`,
-      `tmux set -t deer status-position bottom`,
-      `tmux set -t deer status-style 'bg=#313244,fg=#cdd6f4'`,
-      `tmux set -t deer status-left ' Ctrl+b d = detach (return to deer) | Ctrl+b [ = scroll (q exits) '`,
-      `tmux set -t deer status-left-length 80`,
-      `tmux set -t deer status-right ''`,
-      `tmux set -t deer focus-events off`,
-      `tmux attach -t deer`,
-    ].join("\n");
-
-    const attachProc = Bun.spawn([
-      "docker", "sandbox", "exec", "-it", agent.meta.sandboxName,
-      "env", "-u", "ANTHROPIC_API_KEY",
-      `CLAUDE_CODE_OAUTH_TOKEN=${process.env.CLAUDE_CODE_OAUTH_TOKEN}`,
-      "sh", "-c", tmuxScript,
-    ], {
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
+      const attachProc = Bun.spawn([
+        "docker", "sandbox", "exec", "-it", agent.meta!.sandboxName,
+        "env", "-u", "ANTHROPIC_API_KEY",
+        `CLAUDE_CODE_OAUTH_TOKEN=${process.env.CLAUDE_CODE_OAUTH_TOKEN}`,
+        "sh", "-c", tmuxScript,
+      ], {
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      await attachProc.exited;
     });
-    await attachProc.exited;
-
-    // Restore alternate screen and raw mode
-    if (process.stdin.setRawMode) process.stdin.setRawMode(true);
-    process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
-    setSuspended(false);
 
     // Update lastActivity from current pane content after detach
     if (agent.meta && agent.status === "running") {
@@ -1253,10 +1234,9 @@ export default function Dashboard({ cwd }: { cwd: string }) {
 
   // ── Derived state ────────────────────────────────────────────────
 
-  const visibleAgents = agents;
-  const clampedIdx = Math.min(selectedIdx, Math.max(visibleAgents.length - 1, 0));
-  const activeCount = visibleAgents.filter(isActive).length;
-  const selected = visibleAgents[clampedIdx] || null;
+  const clampedIdx = Math.min(selectedIdx, Math.max(agents.length - 1, 0));
+  const activeCount = agents.filter(isActive).length;
+  const selected = agents[clampedIdx] || null;
   const preflightOk = preflight?.ok ?? false;
 
   // Layout: header(1) + divider(1) + list(flex) + [detail] + divider(1) + input(1) + footer(1)
@@ -1264,7 +1244,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   const detailHeight = logExpanded && selected ? Math.min(MAX_VISIBLE_LOGS + 1, 6) : 0;
   const listHeight = Math.max(termHeight - chromeHeight - detailHeight, 3);
   // Use the larger row size to ensure we don't overflow the list area
-  const hasPrEntries = visibleAgents.some((a) => a.result?.prUrl);
+  const hasPrEntries = agents.some((a) => a.result?.prUrl);
   const entryRows = hasPrEntries ? ENTRY_ROWS_WITH_PR : ENTRY_ROWS_BASE;
   const maxVisibleEntries = Math.max(Math.floor(listHeight / entryRows), 1);
 
@@ -1294,12 +1274,12 @@ export default function Dashboard({ cwd }: { cwd: string }) {
 
       {/* Agent list */}
       <Box flexDirection="column" height={listHeight} paddingX={1}>
-        {visibleAgents.length === 0 ? (
+        {agents.length === 0 ? (
           <Box justifyContent="center" paddingY={1}>
             <Text dimColor>Type a prompt below and press Enter to launch an agent</Text>
           </Box>
         ) : (
-          visibleAgents.slice(0, maxVisibleEntries).map((agent, i) => {
+          agents.slice(0, maxVisibleEntries).map((agent, i) => {
             const display = STATUS_DISPLAY[agent.status];
             const isSelected = i === clampedIdx && !inputFocused;
             const pointer = isSelected ? "▸" : " ";
@@ -1310,11 +1290,10 @@ export default function Dashboard({ cwd }: { cwd: string }) {
             // Title line: overhead = paddingX(2) + pointer(1) + gap(1) + icon(1) + gap(1) + gap(1) + time(4) = 11
             const titleOverhead = 11;
             const prBadge = agent.result?.prUrl && agent.prState
-              ? agent.prState === "open"
-                ? { icon: "🟢", color: "green" }
-                : agent.prState === "merged"
-                  ? { icon: "🟣", color: "magenta" }
-                  : { icon: "🔴", color: "red" }
+              ? {
+                  icon: agent.prState === "merged" ? "🟣" : agent.prState === "closed" ? "🔴" : "🟢",
+                  color: prStateColor(agent.prState),
+                }
               : null;
             const titleWidth = Math.max(termWidth - titleOverhead - (prBadge ? 3 : 0), 5);
             // Log line: paddingX(2) + indent(3) = 5
@@ -1345,7 +1324,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
                   <Box paddingLeft={3}>
                     <Text
                       dimColor={!isSelected}
-                      color={agent.prState === "merged" ? "magenta" : agent.prState === "closed" ? "red" : "green"}
+                      color={prStateColor(agent.prState)}
                       wrap="truncate"
                     >
                       {truncate(agent.result.prUrl, logWidth)}
@@ -1381,7 +1360,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
             ))}
             {selected.result?.prUrl && (
               <Text
-                color={selected.prState === "merged" ? "magenta" : selected.prState === "closed" ? "red" : "green"}
+                color={prStateColor(selected.prState)}
                 bold
               >
                 PR ({selected.prState ?? "checking…"}): {selected.result.prUrl}
