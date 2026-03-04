@@ -499,7 +499,7 @@ async function finalizeAgent(
       agent.lastActivity = "PR ready";
     } else if (agent.transcript.length > 0) {
       agent.transcriptPath = await persistTranscript(agent);
-      agent.lastActivity = "Answer ready — Enter to view";
+      agent.lastActivity = "Answer ready — Enter to continue";
     } else {
       agent.lastActivity = "No changes";
     }
@@ -939,6 +939,32 @@ export default function Dashboard({ cwd }: { cwd: string }) {
     setSuspended(false);
   }, []);
 
+  // ── Continue Q&A conversation interactively ──────────────────────
+
+  const continueConversation = useCallback(async (agent: AgentState) => {
+    const dir = agent.meta?.worktreePath ?? cwd;
+
+    setSuspended(true);
+
+    // Leave alternate screen and release raw mode
+    process.stdout.write("\x1b[?1049l");
+    if (process.stdin.setRawMode) process.stdin.setRawMode(false);
+
+    const proc = Bun.spawn(["claude"], {
+      cwd: dir,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    await proc.exited;
+
+    // Restore alternate screen and raw mode
+    if (process.stdin.setRawMode) process.stdin.setRawMode(true);
+    process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
+
+    setSuspended(false);
+  }, [cwd]);
+
   // ── Attach to running agent (interactive Claude session) ────────
 
   const attachToAgent = useCallback(async (agent: AgentState) => {
@@ -1107,8 +1133,8 @@ export default function Dashboard({ cwd }: { cwd: string }) {
           // Open completed PR in browser
           openUrl(agent.result.prUrl);
         } else if (agent?.transcriptPath) {
-          // Open Q&A transcript in editor
-          openInEditor(agent.transcriptPath);
+          // Continue conversation interactively
+          continueConversation(agent);
         }
       }
       if (input === "s") {
