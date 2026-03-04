@@ -17,69 +17,13 @@ function makeAgent(overrides: Partial<AgentState> = {}): AgentState {
     proc: null,
     timer: null,
     prState: null,
-    userAttached: false,
     needsAttention: false,
-    sessionId: null,
-    tmuxWatched: false,
     transcript: [],
     transcriptPath: null,
     historical: false,
     ...overrides,
   };
 }
-
-// ── session_id capture ──────────────────────────────────────────────
-
-describe("parseNdjsonLine - session_id capture", () => {
-  test("captures session_id from the first event", () => {
-    const agent = makeAgent();
-    const line = JSON.stringify({
-      type: "system",
-      message: "Claude started",
-      session_id: "abc-123-def",
-    });
-
-    parseNdjsonLine(line, agent);
-    expect(agent.sessionId).toBe("abc-123-def");
-  });
-
-  test("captures session_id from assistant event", () => {
-    const agent = makeAgent();
-    const line = JSON.stringify({
-      type: "assistant",
-      session_id: "sess-456",
-      message: {
-        content: [{ type: "text", text: "Hello" }],
-      },
-    });
-
-    parseNdjsonLine(line, agent);
-    expect(agent.sessionId).toBe("sess-456");
-  });
-
-  test("does not overwrite session_id once captured", () => {
-    const agent = makeAgent({ sessionId: "first-session" });
-    const line = JSON.stringify({
-      type: "system",
-      message: "Another event",
-      session_id: "second-session",
-    });
-
-    parseNdjsonLine(line, agent);
-    expect(agent.sessionId).toBe("first-session");
-  });
-
-  test("handles events without session_id", () => {
-    const agent = makeAgent();
-    const line = JSON.stringify({
-      type: "system",
-      message: "No session id here",
-    });
-
-    parseNdjsonLine(line, agent);
-    expect(agent.sessionId).toBeNull();
-  });
-});
 
 // ── existing parsing behavior ───────────────────────────────────────
 
@@ -121,23 +65,6 @@ describe("parseNdjsonLine - event parsing", () => {
     const changed = parseNdjsonLine(line, agent);
     expect(changed).toBe(true);
     expect(agent.currentTool).toContain("Read");
-  });
-
-  test("sets needsAttention for AskUserQuestion tool", () => {
-    const agent = makeAgent();
-    const line = JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [{
-          type: "tool_use",
-          name: "AskUserQuestion",
-          input: { question: "Which approach?" },
-        }],
-      },
-    });
-
-    parseNdjsonLine(line, agent);
-    expect(agent.needsAttention).toBe(true);
   });
 
   test("parses content_block_delta", () => {

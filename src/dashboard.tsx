@@ -37,7 +37,7 @@ export interface AgentState {
   status: AgentStatus;
   /** Elapsed seconds */
   elapsed: number;
-  /** Last activity from NDJSON stream */
+  /** Last activity from tmux pane capture */
   lastActivity: string;
   /** Current tool being used */
   currentTool: string;
@@ -49,21 +49,15 @@ export interface AgentState {
   result: TeardownResult | null;
   /** Error message on failure */
   error: string;
-  /** Running process handle */
+  /** Running process handle (or tmux kill handle) */
   proc: { kill(): void } | null;
   /** Timer handle */
   timer: ReturnType<typeof setInterval> | null;
   /** PR state on GitHub: null = unchecked, "open" = open, "merged" = merged, "closed" = closed */
   prState: "open" | "merged" | "closed" | null;
-  /** User attached interactively — headless process killed, attach handler owns teardown */
-  userAttached: boolean;
   /** Agent is waiting for user input (e.g. AskUserQuestion tool) */
   needsAttention: boolean;
-  /** Claude Code session ID from the NDJSON stream (for --resume handoff) */
-  sessionId: string | null;
-  /** Background tmux watcher is running for this agent */
-  tmuxWatched: boolean;
-  /** Human-readable conversation transcript (markdown blocks) */
+  /** Human-readable conversation transcript (terminal output lines) */
   transcript: string[];
   /** Path to persisted transcript file (set when completed with no code changes) */
   transcriptPath: string | null;
@@ -92,14 +86,6 @@ const ENTRY_ROWS_WITH_PR = ENTRY_ROWS_BASE + 1;
 const MODEL = "sonnet";
 const PR_MERGE_CHECK_INTERVAL_MS = 60_000;
 
-/** Tool names that indicate the agent is blocked waiting for user input */
-const ATTENTION_TOOLS = new Set([
-  "AskUserQuestion",
-  "AskFollowupQuestion",
-  "EnterPlanMode",
-  "ExitPlanMode",
-]);
-
 /** Timeout for the metadata extraction follow-up invocation */
 const METADATA_TIMEOUT_MS = 60_000;
 
@@ -127,6 +113,38 @@ function appendLog(agent: AgentState, line: string) {
 
 function isActive(a: AgentState): boolean {
   return a.status === "setup" || a.status === "running" || a.status === "teardown";
+}
+
+/** Strip ANSI escape sequences from terminal output */
+export function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
+          .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
+}
+
+/** Check if the deer tmux pane's command has exited */
+async function isTmuxPaneDead(sandboxName: string): Promise<boolean> {
+  const proc = Bun.spawn([
+    "docker", "sandbox", "exec", sandboxName,
+    "tmux", "list-panes", "-t", "deer", "-F", "#{pane_dead}",
+  ], { stdout: "pipe", stderr: "pipe" });
+  if ((await proc.exited) !== 0) return true; // session gone = dead
+  const result = (await new Response(proc.stdout).text()).trim();
+  return result === "1";
+}
+
+/** Capture tmux pane content. Returns lines or null if session doesn't exist. */
+async function captureTmuxPane(
+  sandboxName: string,
+  fullScrollback = false,
+): Promise<string[] | null> {
+  const args = ["docker", "sandbox", "exec", sandboxName,
+    "tmux", "capture-pane", "-t", "deer", "-p"];
+  if (fullScrollback) args.push("-S", "-");
+
+  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+  if ((await proc.exited) !== 0) return null;
+  const text = await new Response(proc.stdout).text();
+  return text.split("\n");
 }
 
 function openUrl(url: string) {
@@ -319,27 +337,37 @@ async function applyNetworkPolicy(sandboxName: string, allowlist: string[]): Pro
 }
 
 /**
- * Run claude -p inside the sandbox. Returns the spawned process.
- * The caller should read stdout for NDJSON events.
+ * Start Claude inside a tmux session in the sandbox.
+ * Claude runs as the initial process of the tmux session; when it exits,
+ * remain-on-exit keeps the pane alive so we can capture scrollback.
  */
-async function startClaude(meta: SandboxMeta, prompt: string): Promise<ReturnType<typeof Bun.spawn>> {
-  // Write prompt to temp dir outside worktree to avoid polluting the git working tree
+async function startClaudeInTmux(meta: SandboxMeta, prompt: string): Promise<void> {
   const promptPath = join(meta.deerTmpDir, ".agent-prompt");
   await Bun.write(promptPath, prompt);
+
+  const script = [
+    `export PATH="$PATH:/usr/bin:/usr/local/bin:/bin"`,
+    `export TERM=xterm-256color`,
+    `tmux new-session -d -s deer "cd ${meta.worktreePath} && cat ${meta.deerTmpDir}/.agent-prompt | claude -p --verbose --dangerously-skip-permissions --model ${MODEL}"`,
+    `tmux set -t deer remain-on-exit on`,
+  ].join(" && ");
 
   const proc = Bun.spawn([
     "docker", "sandbox", "exec", "--privileged", meta.sandboxName,
     "env", "-u", "ANTHROPIC_API_KEY",
     `CLAUDE_CODE_OAUTH_TOKEN=${process.env.CLAUDE_CODE_OAUTH_TOKEN}`,
-    "sh", "-c",
-    `cd ${meta.worktreePath} && cat ${meta.deerTmpDir}/.agent-prompt | claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model ${MODEL}`,
+    "sh", "-c", script,
   ], {
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env },
   });
 
-  return proc;
+  const code = await proc.exited;
+  if (code !== 0) {
+    const stderr = await new Response(proc.stderr).text();
+    throw new Error(`Failed to start Claude in tmux: ${stderr.trim()}`);
+  }
 }
 
 /**
@@ -586,11 +614,6 @@ export function parseNdjsonLine(line: string, agent: AgentState): boolean {
   try {
     const event = JSON.parse(line);
 
-    // Capture session_id from the first event that carries one
-    if (!agent.sessionId && event.session_id) {
-      agent.sessionId = event.session_id;
-    }
-
     // Assistant text content
     if (event.type === "assistant" && event.message?.content) {
       for (const block of event.message.content) {
@@ -605,9 +628,6 @@ export function parseNdjsonLine(line: string, agent: AgentState): boolean {
           const input = block.input ? JSON.stringify(block.input).slice(0, 100) : "";
           agent.currentTool = `${name} ${input}`;
           appendLog(agent, `[tool] ${name} ${input}`);
-          if (ATTENTION_TOOLS.has(name)) {
-            agent.needsAttention = true;
-          }
           changed = true;
         }
       }
@@ -680,10 +700,7 @@ function historicalAgent(task: PersistedTask, id: number): AgentState {
     proc: null,
     timer: null,
     prState: null,
-    userAttached: false,
     needsAttention: false,
-    sessionId: null,
-    tmuxWatched: false,
     transcript: [],
     transcriptPath: task.transcriptPath,
     historical: true,
@@ -835,10 +852,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
       proc: null,
       timer: null,
       prState: null,
-      userAttached: false,
       needsAttention: false,
-      sessionId: null,
-      tmuxWatched: false,
       transcript: [],
       transcriptPath: null,
       historical: false,
@@ -880,76 +894,77 @@ export default function Dashboard({ cwd }: { cwd: string }) {
       agent.status = transition(agent.status, "SETUP_COMPLETE") ?? agent.status;
       setAgents((prev) => [...prev]);
 
-      // Phase 2: Run Claude
-      const proc = await startClaude(agent.meta, prompt.trim());
-      agent.proc = proc;
+      // Phase 2: Run Claude in tmux
+      await startClaudeInTmux(agent.meta, prompt.trim());
+
+      // Kill handle: killing the tmux session stops Claude
+      agent.proc = {
+        kill() {
+          if (!agent.meta) return;
+          Bun.spawn([
+            "docker", "sandbox", "exec", agent.meta.sandboxName,
+            "tmux", "kill-session", "-t", "deer",
+          ], { stdout: "pipe", stderr: "pipe" });
+        },
+      };
       setAgents((prev) => [...prev]);
 
-      // Drain stderr to prevent backpressure (fire-and-forget)
-      new Response(proc.stderr as ReadableStream<Uint8Array>).text().then((text) => {
-        if (text.trim()) appendLog(agent, `[stderr] ${text.trim()}`);
-      });
-
-      // Parse NDJSON stream from stdout
-      const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let lastRender = 0;
-
+      // Poll tmux pane for status updates
+      const POLL_MS = 3_000;
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        await Bun.sleep(POLL_MS);
+        if ((agent.status as AgentStatus) === "cancelled") return;
+        if (!agent.meta) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        const dead = await isTmuxPaneDead(agent.meta.sandboxName);
+        if (dead) break;
 
-        let changed = false;
-        for (const line of lines) {
-          if (parseNdjsonLine(line, agent)) changed = true;
-        }
-
-        // Throttle UI updates to ~200ms
-        const now = Date.now();
-        if (changed && now - lastRender > 200) {
-          lastRender = now;
-          setAgents((prev) => [...prev]);
+        // Capture visible pane content for lastActivity
+        const lines = await captureTmuxPane(agent.meta.sandboxName);
+        if (lines) {
+          const lastLine = lines
+            .map(stripAnsi)
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .pop();
+          if (lastLine) {
+            agent.lastActivity = truncate(lastLine, 120);
+            setAgents((prev) => [...prev]);
+          }
         }
       }
 
-      // Process remaining buffer
-      if (buffer.trim()) parseNdjsonLine(buffer, agent);
-
-      const exitCode = await proc.exited;
       if ((agent.status as AgentStatus) === "cancelled") return;
-      // User attached interactively — attach handler owns teardown
-      if (agent.userAttached) return;
 
-      // Agent exited while waiting for user input — keep alive for attachment
-      if (agent.needsAttention || await needsHumanInput(agent.transcript)) {
-        agent.needsAttention = true;
-        agent.lastActivity = "Needs input — Enter to assist";
-        agent.proc = null;
-        setAgents((prev) => [...prev]);
-        return;
-      }
+      // Capture full scrollback as transcript
+      if (agent.meta) {
+        const scrollback = await captureTmuxPane(agent.meta.sandboxName, true);
+        if (scrollback) {
+          const cleaned = scrollback.map(stripAnsi).filter((l) => l.trim());
+          agent.transcript = cleaned;
 
-      if (exitCode !== 0) {
-        throw new Error(`Claude exited with code ${exitCode}`);
+          // Check if agent is waiting for human input
+          if (await needsHumanInput(cleaned)) {
+            agent.needsAttention = true;
+            agent.lastActivity = "Needs input — Enter to assist";
+            agent.proc = null;
+            setAgents((prev) => [...prev]);
+            return;
+          }
+        }
       }
 
       // Metadata extraction + teardown
       await finalizeAgent(agent, cwd, setAgents);
     } catch (err) {
-      if (agent.status !== "cancelled" && !agent.userAttached) {
+      if (agent.status !== "cancelled") {
         agent.status = transition(agent.status, "ERROR") ?? "failed";
         agent.error = err instanceof Error ? err.message : String(err);
         agent.lastActivity = truncate(agent.error, 120);
         await saveToHistory(agent, cwd);
       }
     } finally {
-      // If user attached or agent awaiting input, keep timer running — attach handler cleans up
-      if (!agent.userAttached && !agent.needsAttention) {
+      if (!agent.needsAttention) {
         if (agent.timer) clearInterval(agent.timer);
         agent.timer = null;
       }
@@ -1052,15 +1067,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   const attachToAgent = useCallback(async (agent: AgentState) => {
     if (!agent.meta || agent.status !== "running") return;
 
-    // First attach: kill headless process so Claude can start interactively
-    if (!agent.userAttached) {
-      agent.userAttached = true;
-      agent.needsAttention = false;
-      if (agent.proc) {
-        try { agent.proc.kill(); } catch { /* ignore */ }
-        agent.proc = null;
-      }
-    }
+    agent.needsAttention = false;
 
     setSuspended(true);
 
@@ -1068,21 +1075,9 @@ export default function Dashboard({ cwd }: { cwd: string }) {
     process.stdout.write("\x1b[?1049l");
     if (process.stdin.setRawMode) process.stdin.setRawMode(false);
 
-    const resumeFlag = agent.sessionId
-      ? `--resume ${agent.sessionId}`
-      : "--continue";
-
     const tmuxScript = [
       `export PATH="$PATH:/usr/bin:/usr/local/bin:/bin"`,
       `export TERM=xterm-256color`,
-      `if ! command -v tmux >/dev/null 2>&1; then`,
-      `  echo "ERROR: tmux is not installed in the sandbox. Attach requires tmux." >&2`,
-      `  exit 1`,
-      `fi`,
-      `if ! tmux has-session -t deer 2>/dev/null; then`,
-      `  tmux new-session -d -s deer`,
-      `  tmux send-keys -t deer "export CLAUDE_CODE_OAUTH_TOKEN='$CLAUDE_CODE_OAUTH_TOKEN' && cd ${agent.meta.worktreePath} && claude ${resumeFlag} --dangerously-skip-permissions --model ${MODEL}" Enter`,
-      `fi`,
       `tmux set -t deer status on`,
       `tmux set -t deer status-position bottom`,
       `tmux set -t deer status-style 'bg=#313244,fg=#cdd6f4'`,
@@ -1110,40 +1105,16 @@ export default function Dashboard({ cwd }: { cwd: string }) {
     process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
     setSuspended(false);
 
-    // Bail if agent was killed while we were attached
-    if (agent.status !== "running") return;
-
-    // Check if Claude is still running in tmux
-    const check = Bun.spawn([
-      "docker", "sandbox", "exec", agent.meta.sandboxName,
-      "tmux", "has-session", "-t", "deer",
-    ], { stdout: "pipe", stderr: "pipe" });
-    const sessionAlive = (await check.exited) === 0;
-
-    if (sessionAlive) {
-      // User detached — Claude still running in tmux
-      agent.lastActivity = "Running in tmux (Enter to re-attach)";
-      setAgents((prev) => [...prev]);
-
-      // Start a background watcher (once) to finalize when Claude exits
-      if (!agent.tmuxWatched) {
-        agent.tmuxWatched = true;
-        (async () => {
-          while (agent.status === "running" && agent.meta) {
-            await Bun.sleep(3000);
-            const p = Bun.spawn([
-              "docker", "sandbox", "exec", agent.meta.sandboxName,
-              "tmux", "has-session", "-t", "deer",
-            ], { stdout: "pipe", stderr: "pipe" });
-            if ((await p.exited) !== 0) break;
-          }
-          if (agent.status !== "running") return;
-          await finalizeAgent(agent, cwd, setAgents);
-        })();
+    // Update lastActivity from current pane content after detach
+    if (agent.meta && agent.status === "running") {
+      const lines = await captureTmuxPane(agent.meta.sandboxName);
+      if (lines) {
+        const lastLine = lines.map(stripAnsi).map((l) => l.trim()).filter(Boolean).pop();
+        if (lastLine) {
+          agent.lastActivity = truncate(lastLine, 120);
+        }
       }
-    } else {
-      // Claude exited — finalize immediately
-      await finalizeAgent(agent, cwd, setAgents);
+      setAgents((prev) => [...prev]);
     }
   }, [cwd]);
 
@@ -1462,9 +1433,9 @@ export default function Dashboard({ cwd }: { cwd: string }) {
                     {ACTION_BINDINGS[action].keyDisplay} {ACTION_BINDINGS[action].label}
                   </Text>
                 ))}
+                <Text dimColor>q quit</Text>
               </>
             )}
-            <Text dimColor>q quit</Text>
           </>
         )}
       </Box>
