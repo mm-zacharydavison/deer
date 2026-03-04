@@ -670,18 +670,54 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   agentsRef.current = agents;
   const configRef = useRef<DeerConfig | null>(null);
 
+  // ── Sync state from history file (cross-instance source of truth) ──
+
+  const syncWithHistory = useCallback(async () => {
+    const fileTasks = await loadHistory(cwd);
+    const currentAgents = agentsRef.current;
+    const agentByTaskId = new Map(currentAgents.map(a => [a.taskId, a]));
+    const fileTaskIds = new Set(fileTasks.map(t => t.taskId));
+
+    const newAgents: AgentState[] = fileTasks.map(task => {
+      const existing = agentByTaskId.get(task.taskId);
+      if (existing && !existing.historical) {
+        return existing; // keep live process handle and timer
+      }
+      const id = existing?.id ?? nextId.current++;
+      return historicalAgent(task, id);
+    });
+
+    // Keep owned agents not yet written to the file (edge case: spawned but not yet persisted)
+    for (const agent of currentAgents) {
+      if (!agent.historical && !fileTaskIds.has(agent.taskId)) {
+        newAgents.push(agent);
+      }
+    }
+
+    const changed =
+      newAgents.length !== currentAgents.length ||
+      newAgents.some((a, i) => {
+        const cur = currentAgents[i];
+        return !cur || a.taskId !== cur.taskId || a.status !== cur.status || a.lastActivity !== cur.lastActivity;
+      });
+
+    if (changed) setAgents(newAgents);
+  }, [cwd]);
+
   // ── Load history + preflight on mount ─────────────────────────────
 
   useEffect(() => {
     runPreflight().then(setPreflight);
     loadConfig(cwd).then((cfg) => { configRef.current = cfg; });
-    loadHistory(cwd).then((tasks) => {
-      if (tasks.length === 0) return;
-      const historical = tasks.map((t, i) => historicalAgent(t, i + 1));
-      nextId.current = historical.length + 1;
-      setAgents(historical);
-    });
-  }, [cwd]);
+    syncWithHistory();
+  }, [cwd, syncWithHistory]);
+
+  // ── Poll history file for changes from other deer instances ────────
+
+  useEffect(() => {
+    const interval = setInterval(syncWithHistory, 2_000);
+    return () => clearInterval(interval);
+  }, [syncWithHistory]);
 
   // ── Cleanup on unmount ───────────────────────────────────────────
 
