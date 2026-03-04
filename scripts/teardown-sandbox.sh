@@ -78,27 +78,33 @@ fi
 # there are staged, unstaged, or untracked changes left over.
 
 HAS_UNCOMMITTED=false
-if ! git -C "$WORKTREE_DIR" diff --quiet \
-   || ! git -C "$WORKTREE_DIR" diff --cached --quiet \
-   || [ -n "$(git -C "$WORKTREE_DIR" ls-files --others --exclude-standard)" ]; then
-  HAS_UNCOMMITTED=true
-fi
-
-if [ "$HAS_UNCOMMITTED" = true ]; then
-  info "Committing uncommitted changes..."
-  git -C "$WORKTREE_DIR" add -A
-  # After cleanup, agent artifacts may have been the only changes — check before committing
-  if ! git -C "$WORKTREE_DIR" diff --cached --quiet; then
-    git -C "$WORKTREE_DIR" commit -m "$COMMIT_MSG"
-    ok "Committed"
-  else
-    info "No real changes after cleanup — skipping commit"
+if [ -d "$WORKTREE_DIR" ]; then
+  if ! git -C "$WORKTREE_DIR" diff --quiet \
+     || ! git -C "$WORKTREE_DIR" diff --cached --quiet \
+     || [ -n "$(git -C "$WORKTREE_DIR" ls-files --others --exclude-standard)" ]; then
+    HAS_UNCOMMITTED=true
   fi
+
+  if [ "$HAS_UNCOMMITTED" = true ]; then
+    info "Committing uncommitted changes..."
+    git -C "$WORKTREE_DIR" add -A
+    # After cleanup, agent artifacts may have been the only changes — check before committing
+    if ! git -C "$WORKTREE_DIR" diff --cached --quiet; then
+      git -C "$WORKTREE_DIR" commit -m "$COMMIT_MSG"
+      ok "Committed"
+    else
+      info "No real changes after cleanup — skipping commit"
+    fi
+  fi
+else
+  warn "Worktree directory not found: $WORKTREE_DIR — skipping local commit step"
 fi
 
 # ── Check if branch has any commits ahead of base ────────────────────
 
-COMMITS_AHEAD=$(git -C "$WORKTREE_DIR" rev-list --count "$BASE_BRANCH..HEAD" 2>/dev/null || echo "0")
+COMMITS_AHEAD=$(git -C "$WORKTREE_DIR" rev-list --count "$BASE_BRANCH..HEAD" 2>/dev/null \
+  || git -C "$REPO_ROOT" rev-list --count "$BASE_BRANCH..$TEMP_BRANCH" 2>/dev/null \
+  || echo "0")
 if [ "$COMMITS_AHEAD" = "0" ]; then
   warn "No changes were made. Skipping PR."
   echo '{"finalBranch":"","prUrl":""}'
