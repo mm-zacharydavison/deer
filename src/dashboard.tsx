@@ -798,12 +798,12 @@ export default function Dashboard({ cwd }: { cwd: string }) {
       setAgents((prev) => [...prev]);
 
       // Drain stderr to prevent backpressure (fire-and-forget)
-      new Response(proc.stderr).text().then((text) => {
+      new Response(proc.stderr as ReadableStream<Uint8Array>).text().then((text) => {
         if (text.trim()) appendLog(agent, `[stderr] ${text.trim()}`);
       });
 
       // Parse NDJSON stream from stdout
-      const reader = proc.stdout.getReader();
+      const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
       const decoder = new TextDecoder();
       let buffer = "";
       let lastRender = 0;
@@ -833,7 +833,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
       if (buffer.trim()) parseNdjsonLine(buffer, agent);
 
       const exitCode = await proc.exited;
-      if (agent.status === "cancelled") return;
+      if ((agent.status as AgentStatus) === "cancelled") return;
       // User attached interactively — attach handler owns teardown
       if (agent.userAttached) return;
 
