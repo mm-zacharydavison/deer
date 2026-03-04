@@ -180,17 +180,6 @@ docker sandbox exec "$SANDBOX_NAME" \
 
 ok "Sandbox ready"
 
-# ── Inject agent instructions ──────────────────────────────────────────
-# Metadata files (branch name, commit message, PR body) are requested in
-# a follow-up message after the main task — see dashboard.tsx startClaudeMetadata().
-
-cat >> "$WORKTREE_DIR/CLAUDE.md" <<'AGENT_RULES'
-
-# Sandbox Agent Rules
-
-- Do NOT modify CLAUDE.md.
-AGENT_RULES
-
 # ── Output metadata as JSON to stdout ─────────────────────────────────
 
 cat <<EOF
