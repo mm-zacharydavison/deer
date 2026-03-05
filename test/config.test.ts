@@ -20,7 +20,7 @@ describe("loadConfig", () => {
 
     expect(config.defaults.agent).toBe("claude");
     expect(config.defaults.timeoutMs).toBe(1800000);
-    expect(config.network.allowlist).toBeArrayOfSize(7);
+    expect(config.network.allowlist).toBeArrayOfSize(8);
     expect(config.network.allowlist).toContain("api.anthropic.com");
     expect(config.network.allowlist).toContain("github.com");
     expect(config.network.allowlist).toContain("registry.npmjs.org");
@@ -131,6 +131,7 @@ describe("DEFAULT_CONFIG", () => {
     expect(DEFAULT_CONFIG.defaults.timeoutMs).toBe(1800000);
     expect(DEFAULT_CONFIG.network.allowlist).toEqual([
       "api.anthropic.com",
+      "claude.ai",
       "statsig.anthropic.com",
       "sentry.io",
       "registry.npmjs.org",

@@ -10,6 +10,12 @@ import type { DeerConfig } from "./config";
 import { transition, availableActions, resolveKeypress, ACTION_BINDINGS } from "./state-machine";
 import type { AgentState as AgentStatus } from "./state-machine";
 
+// The Docker Sandbox proxy reads ANTHROPIC_API_KEY from the host process env
+// on every `docker sandbox exec` call and injects it into API requests,
+// overriding OAuth auth. Remove it from the process so child processes
+// (especially docker sandbox exec) never inherit it.
+delete process.env.ANTHROPIC_API_KEY;
+
 // ── Types ────────────────────────────────────────────────────────────
 
 interface SandboxMeta {
@@ -367,10 +373,59 @@ async function runPreflight(): Promise<PreflightResult> {
 
 // ── Agent Lifecycle ──────────────────────────────────────────────────
 
-async function setupAgent(cwd: string, baseBranch?: string): Promise<SandboxMeta> {
+async function setupAgent(
+  cwd: string,
+  agent: AgentState,
+  setAgents: (updater: (prev: AgentState[]) => AgentState[]) => void,
+  baseBranch?: string,
+): Promise<SandboxMeta> {
   const args = ["bash", join(SCRIPTS_DIR, "setup-sandbox.sh"), cwd, MODEL];
   if (baseBranch) args.push(baseBranch);
-  return runScriptJson<SandboxMeta>(args, cwd);
+
+  const proc = Bun.spawn(args, { cwd, stdout: "pipe", stderr: "pipe" });
+
+  // Stream stderr lines into agent logs in real-time
+  const stderrStream = proc.stderr as ReadableStream;
+  const reader = stderrStream.getReader();
+  const decoder = new TextDecoder();
+  let stderrBuf = "";
+
+  (async () => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        stderrBuf += decoder.decode(value, { stream: true });
+        const lines = stderrBuf.split("\n");
+        stderrBuf = lines.pop()!;
+        for (const raw of lines) {
+          const line = stripAnsi(raw).trim();
+          if (line) {
+            appendLog(agent, `[setup] ${line}`);
+            agent.lastActivity = truncate(line, 120);
+            setAgents((prev) => [...prev]);
+          }
+        }
+      }
+      // Flush remaining
+      const last = stripAnsi(stderrBuf).trim();
+      if (last) {
+        appendLog(agent, `[setup] ${last}`);
+        agent.lastActivity = truncate(last, 120);
+        setAgents((prev) => [...prev]);
+      }
+    } catch { /* stream closed */ }
+  })();
+
+  const code = await proc.exited;
+  if (code !== 0) {
+    throw new Error(`Setup failed (exit ${code})`);
+  }
+  const stdout = await new Response(proc.stdout).text();
+  const jsonLines = stdout.trim().split("\n").filter(Boolean);
+  const jsonLine = jsonLines[jsonLines.length - 1];
+  if (!jsonLine) throw new Error("Setup script produced no output");
+  return JSON.parse(jsonLine) as SandboxMeta;
 }
 
 /**
@@ -378,11 +433,22 @@ async function setupAgent(cwd: string, baseBranch?: string): Promise<SandboxMeta
  * domains in the config allowlist. Called after sandbox creation but before
  * the agent starts, so tmux/apt installs during setup are unaffected.
  */
+/** Domains that must bypass the MITM proxy so OAuth credentials pass through
+ *  unmodified. The `claude` sandbox template's proxy intercepts these and
+ *  injects the host's ANTHROPIC_API_KEY, overriding CLAUDE_CODE_OAUTH_TOKEN. */
+const PROXY_BYPASS_HOSTS = [
+  "api.anthropic.com",
+  "claude.ai",
+  "statsig.anthropic.com",
+  "sentry.io",
+];
+
 async function applyNetworkPolicy(sandboxName: string, allowlist: string[]): Promise<void> {
   const args = [
     "docker", "sandbox", "network", "proxy", sandboxName,
     "--policy", "deny",
     ...allowlist.flatMap((host) => ["--allow-host", host]),
+    ...PROXY_BYPASS_HOSTS.flatMap((host) => ["--bypass-host", host]),
   ];
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
   const code = await proc.exited;
@@ -394,31 +460,40 @@ async function applyNetworkPolicy(sandboxName: string, allowlist: string[]): Pro
 
 /**
  * Start Claude inside a tmux session in the sandbox.
- * Creates the session first, sets remain-on-exit (so the pane survives for
- * scrollback capture), then sends the command via send-keys so the tmux
- * shell inherits the exported CLAUDE_CODE_OAUTH_TOKEN.
+ * Writes a launcher script to deerTmpDir (bind-mounted into the sandbox)
+ * that bakes in the OAuth token and unsets ANTHROPIC_API_KEY. The script
+ * runs as tmux's initial command, so when Claude exits the pane dies
+ * (remain-on-exit preserves content for scrollback capture).
+ *
+ * A script file avoids fragile quoting through multiple shell layers
+ * (TypeScript → docker exec → sh → tmux send-keys → tmux shell).
  */
 async function startClaudeInTmux(meta: SandboxMeta, prompt: string): Promise<void> {
   const promptPath = join(meta.deerTmpDir, ".agent-prompt");
   await Bun.write(promptPath, prompt);
 
-  // 1. Create session + set remain-on-exit BEFORE the command runs (no race)
-  // 2. send-keys exports the token inside the tmux shell — tmux new-session
-  //    starts a fresh shell that does NOT inherit env from the creating process.
-  // 3. Unset ANTHROPIC_API_KEY so Claude uses OAuth, not API key billing.
-  // 4. "; exit" ensures the shell exits when Claude finishes → pane dies.
+  // Write launcher script — runs as tmux session's initial command.
+  // The token is written directly into the file, avoiding send-keys quoting.
+  // deerTmpDir is inside GIT_DIR which is bind-mounted into the sandbox.
+  const launcherPath = join(meta.deerTmpDir, ".agent-launcher.sh");
+  await Bun.write(launcherPath, [
+    `#!/bin/sh`,
+    `unset ANTHROPIC_API_KEY`,
+    `export CLAUDE_CODE_OAUTH_TOKEN='${process.env.CLAUDE_CODE_OAUTH_TOKEN}'`,
+    `cd "${meta.worktreePath}"`,
+    `cat "${meta.deerTmpDir}/.agent-prompt" | claude -p --verbose --dangerously-skip-permissions --model ${MODEL}`,
+  ].join("\n") + "\n");
+
   const script = [
     `export PATH="$PATH:/usr/bin:/usr/local/bin:/bin"`,
     `export TERM=xterm-256color`,
-    `tmux new-session -d -s deer`,
+    `chmod +x ${launcherPath}`,
+    `tmux new-session -d -s deer "sh ${launcherPath}"`,
     `tmux set -t deer remain-on-exit on`,
-    `tmux send-keys -t deer "unset ANTHROPIC_API_KEY; export CLAUDE_CODE_OAUTH_TOKEN='$CLAUDE_CODE_OAUTH_TOKEN' && cd ${meta.worktreePath} && cat ${meta.deerTmpDir}/.agent-prompt | claude -p --verbose --dangerously-skip-permissions --model ${MODEL}; exit" Enter`,
   ].join(" && ");
 
   const proc = Bun.spawn([
     "docker", "sandbox", "exec", "--privileged", meta.sandboxName,
-    "env", "-u", "ANTHROPIC_API_KEY",
-    `CLAUDE_CODE_OAUTH_TOKEN=${process.env.CLAUDE_CODE_OAUTH_TOKEN}`,
     "sh", "-c", script,
   ], {
     stdout: "pipe",
@@ -519,8 +594,8 @@ async function startClaudeMetadata(meta: SandboxMeta, agent: AgentState): Promis
   const proc = spawnClaudeInSandbox(meta, `${meta.deerTmpDir}/.agent-metadata-prompt`);
 
   // Drain stdout/stderr to prevent backpressure
-  const stdoutPromise = new Response(proc.stdout).text();
-  const stderrPromise = new Response(proc.stderr).text();
+  const stdoutPromise = new Response(proc.stdout as ReadableStream).text();
+  const stderrPromise = new Response(proc.stderr as ReadableStream).text();
 
   let timeoutId: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
@@ -553,6 +628,35 @@ async function teardownAgent(meta: SandboxMeta, cwd: string): Promise<TeardownRe
     "bash", join(SCRIPTS_DIR, "teardown-sandbox.sh"),
     cwd, meta.worktreePath, meta.sandboxName, meta.tempBranch, meta.baseBranch, meta.model, meta.deerTmpDir,
   ], cwd);
+}
+
+/** Like teardownAgent but captures stderr lines into agent logs. */
+async function teardownAgentWithLogs(meta: SandboxMeta, cwd: string, agent: AgentState): Promise<TeardownResult> {
+  const proc = Bun.spawn([
+    "bash", join(SCRIPTS_DIR, "teardown-sandbox.sh"),
+    cwd, meta.worktreePath, meta.sandboxName, meta.tempBranch, meta.baseBranch, meta.model, meta.deerTmpDir,
+  ], { cwd, stdout: "pipe", stderr: "pipe" });
+
+  const stdoutPromise = new Response(proc.stdout as ReadableStream).text();
+  const stderrPromise = new Response(proc.stderr as ReadableStream).text();
+
+  const code = await proc.exited;
+  const stdout = await stdoutPromise;
+  const stderr = await stderrPromise;
+
+  // Surface the script's progress messages into agent logs
+  for (const line of stderr.trim().split("\n").filter(Boolean)) {
+    appendLog(agent, `[teardown] ${stripAnsi(line).trim()}`);
+  }
+
+  if (code !== 0) {
+    throw new Error(`Teardown failed (exit ${code}): ${stderr.trim().split("\n").pop()}`);
+  }
+
+  const lines = stdout.trim().split("\n").filter(Boolean);
+  const jsonLine = lines[lines.length - 1];
+  if (!jsonLine) throw new Error("Teardown script produced no output");
+  return JSON.parse(jsonLine) as TeardownResult;
 }
 
 function cleanupAgent(agent: AgentState, repoRoot: string) {
@@ -592,6 +696,16 @@ async function finalizeAgent(
     ], { stdout: "pipe", stderr: "pipe" }).exited;
   } catch { /* ignore */ }
 
+  // Check if Claude wrote any code
+  const statusProc = Bun.spawn(
+    ["git", "-C", agent.meta.worktreePath, "status", "--porcelain"],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  const statusOut = await new Response(statusProc.stdout).text();
+  await statusProc.exited;
+  const changeCount = statusOut.trim().split("\n").filter(Boolean).length;
+  appendLog(agent, `[teardown] ${changeCount} file(s) changed in worktree`);
+
   // Metadata extraction (non-fatal)
   agent.lastActivity = "Generating PR metadata...";
   setAgents((prev) => [...prev]);
@@ -608,7 +722,7 @@ async function finalizeAgent(
   setAgents((prev) => [...prev]);
 
   try {
-    agent.result = await teardownAgent(agent.meta, cwd);
+    agent.result = await teardownAgentWithLogs(agent.meta, cwd, agent);
     agent.status = transition(agent.status, "TEARDOWN_COMPLETE") ?? agent.status;
 
     if (agent.result.prUrl) {
@@ -907,18 +1021,20 @@ export default function Dashboard({ cwd }: { cwd: string }) {
 
     try {
       // Phase 1: Setup
-      agent.meta = await setupAgent(cwd, baseBranch);
+      agent.meta = await setupAgent(cwd, agent, setAgents, baseBranch);
 
       // Phase 1.5: Lock down network — deny all, allow only the configured list.
       // Applied after setup (tmux/apt installs are done) but before the agent runs.
       const allowlist = configRef.current?.network.allowlist ?? [];
       await applyNetworkPolicy(agent.meta.sandboxName, allowlist);
+      appendLog(agent, `[setup] Network policy applied`);
 
       agent.status = transition(agent.status, "SETUP_COMPLETE") ?? agent.status;
       setAgents((prev) => [...prev]);
 
       // Phase 2: Run Claude in tmux
       await startClaudeInTmux(agent.meta, prompt.trim());
+      appendLog(agent, `[tmux] Claude session started`);
 
       // Kill handle: killing the tmux session stops Claude
       agent.proc = {
@@ -940,7 +1056,10 @@ export default function Dashboard({ cwd }: { cwd: string }) {
         if (!agent.meta) break;
 
         const dead = await isTmuxPaneDead(agent.meta.sandboxName);
-        if (dead) break;
+        if (dead) {
+          appendLog(agent, `[tmux] Claude process exited`);
+          break;
+        }
 
         // Capture visible pane content for lastActivity
         const lines = await captureTmuxPane(agent.meta.sandboxName);
@@ -952,6 +1071,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
             .pop();
           if (lastLine) {
             agent.lastActivity = truncate(lastLine, 120);
+            appendLog(agent, `[tmux] ${truncate(lastLine, 200)}`);
             setAgents((prev) => [...prev]);
           }
         }
@@ -964,6 +1084,15 @@ export default function Dashboard({ cwd }: { cwd: string }) {
         const scrollback = await captureTmuxPane(agent.meta.sandboxName, true);
         if (scrollback) {
           const cleaned = scrollback.map(stripAnsi).filter((l) => l.trim());
+          appendLog(agent, `[tmux] Captured ${cleaned.length} lines of scrollback`);
+
+          // If Claude exited almost immediately, log the output for debugging
+          if (cleaned.length <= 10) {
+            for (const line of cleaned) {
+              appendLog(agent, `[tmux:out] ${line}`);
+            }
+          }
+
           agent.transcript = cleaned;
 
           // Check if agent is waiting for human input

@@ -41,6 +41,7 @@ export const DEFAULT_CONFIG: DeerConfig = {
   network: {
     allowlist: [
       "api.anthropic.com",
+      "claude.ai",
       "statsig.anthropic.com",
       "sentry.io",
       "registry.npmjs.org",
