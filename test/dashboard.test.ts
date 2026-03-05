@@ -2,6 +2,7 @@ import { test, expect, describe } from "bun:test";
 import { historicalAgent, crossInstanceAgent, createAgentState } from "../src/agent-state";
 import { generateTaskId } from "../src/task";
 import type { PersistedTask } from "../src/task";
+import { fuzzyMatch } from "../src/fuzzy";
 
 function makeTask(overrides?: Partial<PersistedTask>): PersistedTask {
   return {
@@ -18,6 +19,40 @@ function makeTask(overrides?: Partial<PersistedTask>): PersistedTask {
     ...overrides,
   };
 }
+
+describe("fuzzyMatch", () => {
+  test("matches exact substring", () => {
+    expect(fuzzyMatch("fix the bug", "fix")).toBe(true);
+  });
+
+  test("matches case-insensitively", () => {
+    expect(fuzzyMatch("Fix the Bug", "FIX")).toBe(true);
+  });
+
+  test("matches subsequence characters in order", () => {
+    expect(fuzzyMatch("fix the bug", "ftb")).toBe(true);
+  });
+
+  test("does not match when characters are out of order", () => {
+    expect(fuzzyMatch("fix the bug", "bfix")).toBe(false);
+  });
+
+  test("returns true for empty query", () => {
+    expect(fuzzyMatch("anything", "")).toBe(true);
+  });
+
+  test("returns false when no subsequence match", () => {
+    expect(fuzzyMatch("hello", "xyz")).toBe(false);
+  });
+
+  test("matches full text", () => {
+    expect(fuzzyMatch("add dark mode toggle", "add dark mode toggle")).toBe(true);
+  });
+
+  test("returns false for query longer than text with no match", () => {
+    expect(fuzzyMatch("hi", "hello world")).toBe(false);
+  });
+});
 
 describe("historicalAgent", () => {
   test("converts running status to interrupted", () => {

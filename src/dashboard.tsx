@@ -11,6 +11,7 @@ import { startAgent, destroyAgent, createAgentPR } from "./agent";
 import { isTmuxSessionDead, captureTmuxPane } from "./sandbox/index";
 import { detectRepo } from "./git/worktree";
 import { AgentState, createAgentState, historicalAgent, crossInstanceAgent } from "./agent-state";
+import { fuzzyMatch } from "./fuzzy";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -360,6 +361,9 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   const [inputDefault, setInputDefault] = useState("");
   const [inputKey, setInputKey] = useState(0);
   const [animTick, setAnimTick] = useState(0);
+  const [searchMode, setSearchMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchMatchIdx, setSearchMatchIdx] = useState(0);
 
   const nextId = useRef(1);
   const agentsRef = useRef(agents);
@@ -727,6 +731,52 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   useInput((input, key) => {
     if (suspended) return;
 
+    // Search mode: capture all input for the search query
+    if (searchMode) {
+      if (key.escape || (key.ctrl && input === "c")) {
+        setSearchMode(false);
+        setSearchQuery("");
+        setSearchMatchIdx(0);
+        return;
+      }
+      if (key.return) {
+        // Select the currently highlighted search match
+        const matches = agents
+          .map((a, i) => ({ agent: a, idx: i }))
+          .filter(({ agent }) => fuzzyMatch(agent.prompt, searchQuery));
+        const match = matches[searchMatchIdx];
+        if (match) {
+          setSelectedIdx(match.idx);
+          setInputFocused(false);
+        }
+        setSearchMode(false);
+        setSearchQuery("");
+        setSearchMatchIdx(0);
+        return;
+      }
+      if (key.upArrow) {
+        const matchCount = agents.filter((a) => fuzzyMatch(a.prompt, searchQuery)).length;
+        setSearchMatchIdx((prev) => Math.max(prev - 1, 0));
+        return;
+      }
+      if (key.downArrow) {
+        const matchCount = agents.filter((a) => fuzzyMatch(a.prompt, searchQuery)).length;
+        setSearchMatchIdx((prev) => Math.min(prev + 1, Math.max(matchCount - 1, 0)));
+        return;
+      }
+      if (key.backspace || key.delete) {
+        setSearchQuery((prev) => prev.slice(0, -1));
+        setSearchMatchIdx(0);
+        return;
+      }
+      if (input && !key.ctrl && !key.meta) {
+        setSearchQuery((prev) => prev + input);
+        setSearchMatchIdx(0);
+        return;
+      }
+      return;
+    }
+
     const visible = agents;
     const clampedIdx = Math.min(selectedIdx, Math.max(visible.length - 1, 0));
 
@@ -780,6 +830,13 @@ export default function Dashboard({ cwd }: { cwd: string }) {
 
     // List navigation (when list focused)
     if (!inputFocused && visible.length > 0) {
+      if (input === "/") {
+        setSearchMode(true);
+        setSearchQuery("");
+        setSearchMatchIdx(0);
+        return;
+      }
+
       if (input === "j" || key.downArrow) {
         setSelectedIdx((prev) => Math.min(prev + 1, visible.length - 1));
       }
@@ -844,6 +901,11 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   const selected = agents[clampedIdx] || null;
   const preflightOk = preflight?.ok ?? false;
 
+  // Compute search matches for rendering
+  const searchMatches = searchMode
+    ? agents.map((a, i) => ({ agent: a, idx: i })).filter(({ agent }) => fuzzyMatch(agent.prompt, searchQuery))
+    : [];
+
   const chromeHeight = 5;
   const detailHeight = logExpanded && selected ? Math.min(MAX_VISIBLE_LOGS + 1, 6) : 0;
   const listHeight = Math.max(termHeight - chromeHeight - detailHeight, 3);
@@ -880,8 +942,10 @@ export default function Dashboard({ cwd }: { cwd: string }) {
         ) : (
           agents.slice(0, maxVisibleEntries).map((agent, i) => {
             const display = STATUS_DISPLAY[agent.status];
-            const isSelected = i === clampedIdx && !inputFocused;
-            const pointer = isSelected ? "▸" : " ";
+            const isSearchMatch = searchMode && searchMatches.some((m) => m.idx === i);
+            const isSearchSelected = searchMode && searchMatches[searchMatchIdx]?.idx === i;
+            const isSelected = searchMode ? isSearchSelected : (i === clampedIdx && !inputFocused);
+            const pointer = isSelected ? "▸" : (isSearchMatch ? "·" : " ");
 
             const recentLogs = agent.logs.slice(-LOG_LINES_PER_ENTRY);
             const titleOverhead = 11;
@@ -969,32 +1033,58 @@ export default function Dashboard({ cwd }: { cwd: string }) {
       {/* Input divider + input bar */}
       <Text>{"─".repeat(termWidth)}</Text>
       <Box paddingX={1} gap={1}>
-        <Text dimColor>{">"}</Text>
-        {inputFocused ? (
-          <PromptInput
-            key={inputKey}
-            placeholder={!preflightOk ? "preflight checks failed" : "type prompt and press Enter to launch agent (Shift+Enter for newline)"}
-            isDisabled={!preflightOk}
-            defaultValue={inputDefault}
-            onSubmit={(value) => {
-              if (value.trim()) {
-                setPromptHistory((prev) => [...prev, value.trim()]);
-                setHistoryIdx(-1);
-                setInputDefault("");
-                setInputKey((k) => k + 1);
-                spawnAgent(value);
-              }
-            }}
-          />
+        {searchMode ? (
+          <>
+            <Text color="yellow">{"/"}</Text>
+            <Text>
+              {searchQuery}
+              <Text inverse> </Text>
+            </Text>
+            {searchMatches.length > 0 && (
+              <Text dimColor>
+                {searchMatchIdx + 1}/{searchMatches.length}
+              </Text>
+            )}
+            {searchQuery.length > 0 && searchMatches.length === 0 && (
+              <Text dimColor color="red">no matches</Text>
+            )}
+          </>
         ) : (
-          <Text dimColor italic>press Tab to type a prompt</Text>
+          <>
+            <Text dimColor>{">"}</Text>
+            {inputFocused ? (
+              <PromptInput
+                key={inputKey}
+                placeholder={!preflightOk ? "preflight checks failed" : "type prompt and press Enter to launch agent (Shift+Enter for newline)"}
+                isDisabled={!preflightOk}
+                defaultValue={inputDefault}
+                onSubmit={(value) => {
+                  if (value.trim()) {
+                    setPromptHistory((prev) => [...prev, value.trim()]);
+                    setHistoryIdx(-1);
+                    setInputDefault("");
+                    setInputKey((k) => k + 1);
+                    spawnAgent(value);
+                  }
+                }}
+              />
+            ) : (
+              <Text dimColor italic>press Tab to type a prompt</Text>
+            )}
+          </>
         )}
       </Box>
 
       {/* Footer / keybindings */}
       <Text>{"─".repeat(termWidth)}</Text>
       <Box paddingX={1} gap={2}>
-        {confirmQuit ? (
+        {searchMode ? (
+          <>
+            <Text dimColor>j/k nav</Text>
+            <Text dimColor>⏎ select</Text>
+            <Text dimColor>Esc cancel</Text>
+          </>
+        ) : confirmQuit ? (
           <Text color="yellow" bold>
             {activeCount} agent{activeCount !== 1 ? "s" : ""} running — quit? (y/n)
           </Text>
@@ -1004,6 +1094,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
             {inputFocused ? null : (
               <>
                 <Text dimColor>j/k nav</Text>
+                <Text dimColor>/ search</Text>
                 {selected && availableActions({
                   status: selected.status,
                   hasPrUrl: !!selected.result?.prUrl,
