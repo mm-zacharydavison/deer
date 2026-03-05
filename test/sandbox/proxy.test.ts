@@ -1,5 +1,5 @@
 import { test, expect, describe, afterEach } from "bun:test";
-import { startProxy, matchesAllowlist, type ProxyHandle } from "../../src/sandbox/proxy";
+import { startProxy, matchesAllowlist, isPrivateIP, type ProxyHandle } from "../../src/sandbox/proxy";
 import { createServer, type Server } from "node:net";
 
 describe("matchesAllowlist", () => {
@@ -44,6 +44,52 @@ describe("matchesAllowlist", () => {
   });
 });
 
+describe("isPrivateIP", () => {
+  test("loopback IPv4", () => {
+    expect(isPrivateIP("127.0.0.1")).toBe(true);
+    expect(isPrivateIP("127.255.255.255")).toBe(true);
+  });
+
+  test("10.x.x.x range", () => {
+    expect(isPrivateIP("10.0.0.1")).toBe(true);
+    expect(isPrivateIP("10.255.255.255")).toBe(true);
+  });
+
+  test("172.16-31.x.x range", () => {
+    expect(isPrivateIP("172.16.0.1")).toBe(true);
+    expect(isPrivateIP("172.31.255.255")).toBe(true);
+    expect(isPrivateIP("172.15.0.1")).toBe(false);
+    expect(isPrivateIP("172.32.0.1")).toBe(false);
+  });
+
+  test("192.168.x.x range", () => {
+    expect(isPrivateIP("192.168.0.1")).toBe(true);
+    expect(isPrivateIP("192.168.255.255")).toBe(true);
+  });
+
+  test("link-local 169.254.x.x", () => {
+    expect(isPrivateIP("169.254.1.1")).toBe(true);
+  });
+
+  test("IPv6 loopback", () => {
+    expect(isPrivateIP("::1")).toBe(true);
+  });
+
+  test("IPv6 link-local", () => {
+    expect(isPrivateIP("fe80::1")).toBe(true);
+  });
+
+  test("public IPs are not private", () => {
+    expect(isPrivateIP("8.8.8.8")).toBe(false);
+    expect(isPrivateIP("1.1.1.1")).toBe(false);
+    expect(isPrivateIP("93.184.216.34")).toBe(false);
+  });
+
+  test("0.0.0.0", () => {
+    expect(isPrivateIP("0.0.0.0")).toBe(true);
+  });
+});
+
 describe("proxy server", () => {
   const handles: ProxyHandle[] = [];
   const servers: Server[] = [];
@@ -71,8 +117,8 @@ describe("proxy server", () => {
     });
   }
 
-  async function launch(allowlist: string[]): Promise<ProxyHandle> {
-    const h = await startProxy({ allowlist });
+  async function launch(allowlist: string[], rejectPrivateIPs = true): Promise<ProxyHandle> {
+    const h = await startProxy({ allowlist, rejectPrivateIPs });
     handles.push(h);
     return h;
   }
@@ -114,7 +160,7 @@ describe("proxy server", () => {
 
   test("allows CONNECT to allowlisted host (localhost echo server)", async () => {
     const echo = await startEchoServer();
-    const h = await launch(["127.0.0.1"]);
+    const h = await launch(["127.0.0.1"], false);
 
     const { statusCode } = await sendRequest(
       h.port,
@@ -143,7 +189,7 @@ describe("proxy server", () => {
 
   test("relays data through CONNECT tunnel", async () => {
     const echo = await startEchoServer();
-    const h = await launch(["127.0.0.1"]);
+    const h = await launch(["127.0.0.1"], false);
 
     const relayed = await new Promise<string>((resolve, reject) => {
       let gotHandshake = false;
@@ -179,6 +225,28 @@ describe("proxy server", () => {
     });
 
     expect(relayed).toBe("hello from client");
+  });
+
+  test("rejects CONNECT when hostname resolves to private IP", async () => {
+    // "localhost" resolves to 127.0.0.1 — should be rejected even if allowlisted
+    const h = await launch(["localhost"]);
+    const { statusCode } = await sendRequest(
+      h.port,
+      "CONNECT localhost:443 HTTP/1.1\r\nHost: localhost:443\r\n\r\n",
+    );
+    expect(statusCode).toBe(403);
+  });
+
+  test("allows CONNECT to private IP when rejectPrivateIPs is false", async () => {
+    const echo = await startEchoServer();
+    const h = await startProxy({ allowlist: ["127.0.0.1"], rejectPrivateIPs: false });
+    handles.push(h);
+
+    const { statusCode } = await sendRequest(
+      h.port,
+      `CONNECT 127.0.0.1:${echo.port} HTTP/1.1\r\nHost: 127.0.0.1:${echo.port}\r\n\r\n`,
+    );
+    expect(statusCode).toBe(200);
   });
 
   test("stop() shuts down the server", async () => {

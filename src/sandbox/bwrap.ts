@@ -76,13 +76,16 @@ export function buildBwrapArgs(options: BwrapOptions): string[] {
   args.push("--proc", "/proc");
   args.push("--dev", "/dev");
 
+  // Namespace isolation
+  args.push("--unshare-pid");
+  args.push("--unshare-ipc");
+
   // Tmpfs for /tmp (writable but ephemeral, not the host's /tmp)
   args.push("--tmpfs", "/tmp");
 
   // Home directory read-only mounts.
-  // Includes Claude config, tool configs, and any PATH directories under HOME
-  // (e.g. ~/.local/bin/claude, ~/.bun/bin/bun) — mounted at the top-level
-  // so symlink targets are included.
+  // Includes Claude config, tool configs, and specific PATH directories under HOME
+  // (e.g. ~/.local/bin, ~/.bun/bin).
   const homeMounts = new Set<string>();
 
   const addHomeMount = (path: string) => {
@@ -95,7 +98,12 @@ export function buildBwrapArgs(options: BwrapOptions): string[] {
 
   // Claude Code config
   addHomeMount(join(home, ".claude"));
-  addHomeMount(join(home, ".config"));
+
+  // Specific ~/.config sub-paths needed by tools (git, gh, deer).
+  // Avoids exposing the entire ~/.config which contains unrelated secrets.
+  for (const sub of ["git", "gh", "deer"]) {
+    addHomeMount(join(home, ".config", sub));
+  }
 
   // ~/.claude.json (onboarding state — single file, not a directory)
   const claudeJson = join(home, ".claude.json");
@@ -103,14 +111,14 @@ export function buildBwrapArgs(options: BwrapOptions): string[] {
     args.push("--ro-bind", claudeJson, claudeJson);
   }
 
-  // Mount PATH directories under HOME so sandboxed tools are found
+  // Mount PATH directories under HOME so sandboxed tools are found.
+  // Mounts the specific directory (e.g. ~/.local/bin) rather than the
+  // top-level parent (e.g. ~/.local) to avoid exposing unrelated data.
   if (process.env.PATH) {
     const homePrefix = home + "/";
     for (const dir of process.env.PATH.split(":")) {
       if (!dir.startsWith(homePrefix)) continue;
-      const rel = dir.slice(homePrefix.length);
-      const topLevel = join(home, rel.split("/")[0]);
-      addHomeMount(topLevel);
+      addHomeMount(dir);
     }
   }
 

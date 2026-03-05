@@ -1,7 +1,15 @@
 import { connect as netConnect, type Socket as NetSocket } from "node:net";
+import { resolve as dnsResolve } from "node:dns/promises";
 
 export interface ProxyOptions {
   allowlist: string[];
+  /**
+   * Reject connections to RFC1918/loopback addresses after DNS resolution.
+   * Prevents DNS rebinding attacks where an allowlisted hostname resolves
+   * to an internal IP.
+   * @default true
+   */
+  rejectPrivateIPs?: boolean;
 }
 
 export interface ProxyHandle {
@@ -26,6 +34,29 @@ export function matchesAllowlist(hostname: string, allowlist: string[]): boolean
   return false;
 }
 
+/**
+ * Check if an IP address is in a private/reserved range (RFC1918, loopback, link-local).
+ */
+export function isPrivateIP(ip: string): boolean {
+  // IPv6
+  if (ip === "::1") return true;
+  if (ip.toLowerCase().startsWith("fe80:")) return true;
+
+  // IPv4
+  const parts = ip.split(".");
+  if (parts.length !== 4) return false;
+  const [a, b] = parts.map(Number);
+
+  if (a === 0) return true;       // 0.0.0.0/8
+  if (a === 10) return true;      // 10.0.0.0/8
+  if (a === 127) return true;     // 127.0.0.0/8
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+
+  return false;
+}
+
 /** Per-connection state tracking */
 const upstreams = new WeakMap<object, NetSocket>();
 
@@ -38,7 +69,7 @@ const upstreams = new WeakMap<object, NetSocket>();
  * Returns a handle with the listening port and a stop function.
  */
 export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
-  const { allowlist } = options;
+  const { allowlist, rejectPrivateIPs = true } = options;
 
   const server = Bun.listen({
     hostname: "127.0.0.1",
@@ -78,23 +109,41 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyHandle> {
           return;
         }
 
-        // Establish upstream TCP connection
-        const upstream = netConnect({ host, port }, () => {
-          socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-          upstreams.set(socket, upstream);
-        });
+        // Resolve DNS and check for private IPs before connecting
+        const connectToUpstream = (connectHost: string) => {
+          const upstream = netConnect({ host: connectHost, port }, () => {
+            socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+            upstreams.set(socket, upstream);
+          });
 
-        upstream.on("data", (chunk: Buffer) => {
-          socket.write(chunk);
-        });
+          upstream.on("data", (chunk: Buffer) => {
+            socket.write(chunk);
+          });
 
-        upstream.on("end", () => {
-          socket.end();
-        });
+          upstream.on("end", () => {
+            socket.end();
+          });
 
-        upstream.on("error", () => {
-          socket.end();
-        });
+          upstream.on("error", () => {
+            socket.end();
+          });
+        };
+
+        if (rejectPrivateIPs) {
+          dnsResolve(host).then((addresses) => {
+            if (addresses.length === 0 || addresses.some(isPrivateIP)) {
+              socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+              socket.end();
+              return;
+            }
+            connectToUpstream(addresses[0]);
+          }).catch(() => {
+            socket.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+            socket.end();
+          });
+        } else {
+          connectToUpstream(host);
+        }
       },
 
       drain(_socket) {},

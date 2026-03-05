@@ -102,6 +102,51 @@ describe("buildBwrapArgs", () => {
     expect(args).toContain("--dev");
   });
 
+  test("includes --unshare-pid for PID namespace isolation", () => {
+    const args = buildBwrapArgs(defaults);
+    expect(args).toContain("--unshare-pid");
+  });
+
+  test("includes --unshare-ipc for IPC namespace isolation", () => {
+    const args = buildBwrapArgs(defaults);
+    expect(args).toContain("--unshare-ipc");
+  });
+
+  test("mounts specific PATH dirs under HOME, not their parent", () => {
+    // Simulate PATH containing ~/.local/bin
+    const origPath = process.env.PATH;
+    const home = process.env.HOME!;
+    process.env.PATH = `${home}/.local/bin:/usr/bin`;
+    try {
+      const args = buildBwrapArgs(defaults);
+      const roBinds = args.reduce<string[]>((acc, arg, i) => {
+        if (arg === "--ro-bind") acc.push(args[i + 1]);
+        return acc;
+      }, []);
+      // Should mount ~/.local/bin specifically, not ~/.local
+      const hasSpecific = roBinds.includes(join(home, ".local/bin"));
+      const hasParent = roBinds.includes(join(home, ".local"));
+      // Either the specific dir is mounted, or (if it doesn't exist) nothing.
+      // The parent should never be mounted just because a child is in PATH.
+      expect(hasParent).toBe(false);
+    } finally {
+      process.env.PATH = origPath;
+    }
+  });
+
+  test("mounts specific ~/.config sub-paths instead of all of ~/.config", () => {
+    const args = buildBwrapArgs(defaults);
+    const home = process.env.HOME!;
+    const roBinds = args.reduce<string[]>((acc, arg, i) => {
+      if (arg === "--ro-bind") acc.push(args[i + 1]);
+      return acc;
+    }, []);
+    // Should NOT mount all of ~/.config
+    expect(roBinds).not.toContain(join(home, ".config"));
+    // Should mount specific sub-paths
+    expect(roBinds).toContain(join(home, ".config", "git"));
+  });
+
   test("ro-binds ~/.claude for config access", () => {
     const args = buildBwrapArgs(defaults);
     const home = process.env.HOME!;
