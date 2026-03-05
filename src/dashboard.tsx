@@ -371,6 +371,8 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMatchIdx, setSearchMatchIdx] = useState(0);
   const [configAlerts, setConfigAlerts] = useState<ConfigAlert[]>([]);
+  const [logScrollMode, setLogScrollMode] = useState(false);
+  const [logScrollOffset, setLogScrollOffset] = useState(0);
   const guardRef = useRef<ClaudeConfigGuard | null>(null);
 
   const nextId = useRef(1);
@@ -747,6 +749,23 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   useInput((input, key) => {
     if (suspended) return;
 
+    // Log scroll mode: j/k or arrows scroll the log panel, Esc exits
+    if (logScrollMode) {
+      if (key.escape || (key.ctrl && input === "c")) {
+        setLogScrollMode(false);
+        return;
+      }
+      if (input === "j" || key.downArrow) {
+        setLogScrollOffset((prev) => prev + 1);
+        return;
+      }
+      if (input === "k" || key.upArrow) {
+        setLogScrollOffset((prev) => Math.max(prev - 1, 0));
+        return;
+      }
+      return;
+    }
+
     // Search mode: capture all input for the search query
     if (searchMode) {
       if (key.escape || (key.ctrl && input === "c")) {
@@ -855,9 +874,13 @@ export default function Dashboard({ cwd }: { cwd: string }) {
 
       if (input === "j" || key.downArrow) {
         setSelectedIdx((prev) => Math.min(prev + 1, visible.length - 1));
+        setLogScrollMode(false);
+        setLogScrollOffset(0);
       }
       if (input === "k" || key.upArrow) {
         setSelectedIdx((prev) => Math.max(prev - 1, 0));
+        setLogScrollMode(false);
+        setLogScrollOffset(0);
       }
 
       // Resolve agent-specific actions via state machine
@@ -897,11 +920,20 @@ export default function Dashboard({ cwd }: { cwd: string }) {
             break;
           case "toggle_logs":
             setLogExpanded((prev) => !prev);
+            setLogScrollMode(false);
+            setLogScrollOffset(0);
             break;
           case "retry":
             spawnAgent(agent.prompt);
             break;
         }
+      }
+
+      // Enter log scroll mode
+      if (input === "[" && selected) {
+        setLogExpanded(true);
+        setLogScrollMode(true);
+        setLogScrollOffset(0);
       }
     }
   });
@@ -1045,10 +1077,16 @@ export default function Dashboard({ cwd }: { cwd: string }) {
       {logExpanded && selected && (() => {
         const extraLines = (selected.result?.prUrl ? 1 : 0) + (selected.error ? 1 : 0);
         const visibleLogs = Math.max(MAX_VISIBLE_LOGS - extraLines, 1);
+        const totalLogs = selected.logs.length;
+        const maxOffset = Math.max(totalLogs - visibleLogs, 0);
+        const clampedOffset = Math.min(logScrollOffset, maxOffset);
+        const logStart = logScrollMode
+          ? Math.max(totalLogs - visibleLogs - clampedOffset, 0)
+          : Math.max(totalLogs - visibleLogs, 0);
         return (
           <Box flexDirection="column" paddingX={1} height={detailHeight} overflowY="hidden">
             <Text dimColor>{"╌".repeat(termWidth - 2)}</Text>
-            {selected.logs.slice(-visibleLogs).map((line, i) => (
+            {selected.logs.slice(logStart, logStart + visibleLogs).map((line, i) => (
               <Text key={i} dimColor wrap="truncate">
                 {truncate(line, termWidth - 4)}
               </Text>
@@ -1113,7 +1151,13 @@ export default function Dashboard({ cwd }: { cwd: string }) {
       {/* Footer / keybindings */}
       <Text>{"─".repeat(termWidth)}</Text>
       <Box paddingX={1} gap={2}>
-        {searchMode ? (
+        {logScrollMode ? (
+          <>
+            <Text color="cyan">scroll</Text>
+            <Text dimColor>j/k nav</Text>
+            <Text dimColor>Esc exit</Text>
+          </>
+        ) : searchMode ? (
           <>
             <Text dimColor>j/k nav</Text>
             <Text dimColor>⏎ select</Text>
@@ -1142,6 +1186,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
                     {ACTION_BINDINGS[action].keyDisplay} {ACTION_BINDINGS[action].label}
                   </Text>
                 ))}
+                {selected && <Text dimColor>[ scroll</Text>}
                 <Text dimColor>q quit</Text>
               </>
             )}
