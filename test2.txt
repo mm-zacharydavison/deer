@@ -1,0 +1,3 @@
+This is sample text in test2.txt.
+Hello, world!
+Here is a second line of content.
