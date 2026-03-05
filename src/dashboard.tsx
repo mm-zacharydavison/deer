@@ -922,7 +922,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
     ? agents.map((a, i) => ({ agent: a, idx: i })).filter(({ agent }) => fuzzyMatch(agent.prompt, searchQuery))
     : [];
 
-  const chromeHeight = 5;
+  const chromeHeight = 6;
   const alertHeight = configAlerts.length > 0 ? Math.min(configAlerts.length, 3) + 2 + (configAlerts.length > 3 ? 1 : 0) : 0;
   const detailHeight = logExpanded && selected ? Math.min(MAX_VISIBLE_LOGS + 1, 6) : 0;
   const listHeight = Math.max(termHeight - chromeHeight - detailHeight - alertHeight, 3);
