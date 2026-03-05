@@ -12,6 +12,7 @@ import { isTmuxSessionDead, captureTmuxPane } from "./sandbox/index";
 import { detectRepo } from "./git/worktree";
 import { AgentState, createAgentState, historicalAgent, crossInstanceAgent } from "./agent-state";
 import { fuzzyMatch } from "./fuzzy";
+import { startClaudeConfigGuard, type ClaudeConfigGuard, type ConfigAlert } from "./sandbox/claude-config-guard";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -369,6 +370,8 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMatchIdx, setSearchMatchIdx] = useState(0);
+  const [configAlerts, setConfigAlerts] = useState<ConfigAlert[]>([]);
+  const guardRef = useRef<ClaudeConfigGuard | null>(null);
 
   const nextId = useRef(1);
   const agentsRef = useRef(agents);
@@ -435,6 +438,13 @@ export default function Dashboard({ cwd }: { cwd: string }) {
     runPreflight().then(setPreflight);
     loadConfig(cwd).then((cfg) => { configRef.current = cfg; });
     syncWithHistory();
+
+    // Start ~/.claude integrity monitor
+    startClaudeConfigGuard((alert) => {
+      setConfigAlerts((prev) => [...prev, alert]);
+    }).then((guard) => {
+      guardRef.current = guard;
+    }).catch(() => {});
   }, [cwd, syncWithHistory]);
 
   // ── Poll history file for changes from other deer instances ────────
@@ -471,6 +481,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
 
     return () => {
       process.removeListener("exit", cleanup);
+      guardRef.current?.stop();
     };
   }, [cwd]);
 
@@ -912,8 +923,9 @@ export default function Dashboard({ cwd }: { cwd: string }) {
     : [];
 
   const chromeHeight = 5;
+  const alertHeight = configAlerts.length > 0 ? Math.min(configAlerts.length, 3) + 2 + (configAlerts.length > 3 ? 1 : 0) : 0;
   const detailHeight = logExpanded && selected ? Math.min(MAX_VISIBLE_LOGS + 1, 6) : 0;
-  const listHeight = Math.max(termHeight - chromeHeight - detailHeight, 3);
+  const listHeight = Math.max(termHeight - chromeHeight - detailHeight - alertHeight, 3);
   const hasPrEntries = agents.some((a) => a.result?.prUrl);
   const entryRows = hasPrEntries ? ENTRY_ROWS_WITH_PR : ENTRY_ROWS_BASE;
   const maxVisibleEntries = Math.max(Math.floor(listHeight / entryRows), 1);
@@ -924,7 +936,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
     <Box flexDirection="column" width={termWidth} height={termHeight}>
       {/* Header */}
       <Box paddingX={1} justifyContent="space-between">
-        <Text bold>deer</Text>
+        <Text bold>🦌 deer</Text>
         <Text dimColor>{activeCount > 0 ? `${activeCount} active` : "idle"}</Text>
       </Box>
       <Text>{"─".repeat(termWidth)}</Text>
@@ -935,6 +947,24 @@ export default function Dashboard({ cwd }: { cwd: string }) {
           {preflight.errors.map((e) => (
             <Text key={e} color="red">✗ {e}</Text>
           ))}
+        </Box>
+      )}
+
+      {/* Config tampering alerts */}
+      {configAlerts.length > 0 && (
+        <Box flexDirection="column" paddingX={1}>
+          <Text color="red" bold>
+            {configAlerts.some((a) => a.severity === "critical") ? "!! SECURITY" : " ! WARNING"}: ~/.claude modified while agents running
+          </Text>
+          {configAlerts.slice(-3).map((alert, i) => (
+            <Text key={i} color={alert.severity === "critical" ? "red" : "yellow"}>
+              {alert.severity === "critical" ? "!!" : " !"} {alert.type}: {alert.file.replace(process.env.HOME ?? "", "~")}
+            </Text>
+          ))}
+          {configAlerts.length > 3 && (
+            <Text dimColor>   ...and {configAlerts.length - 3} more</Text>
+          )}
+          <Text>{"─".repeat(termWidth - 2)}</Text>
         </Box>
       )}
 

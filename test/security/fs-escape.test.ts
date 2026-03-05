@@ -1,6 +1,6 @@
 import { test, expect, describe, afterEach } from "bun:test";
 import { buildNonoArgs } from "../../src/sandbox/nono";
-import { mkdtemp, rm, writeFile, readFile, symlink } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, symlink, cp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -322,69 +322,80 @@ describe("env passthrough isolation", () => {
 // ── B5: ~/.claude is writable — config injection risk ────────────────
 
 describe("~/.claude config isolation", () => {
+  const home = process.env.HOME!;
+  const claudeDir = join(home, ".claude");
+  const claudeJson = join(home, ".claude.json");
+
+  async function withClaudeBackup(fn: () => Promise<void>): Promise<void> {
+    const backupDir = await mkdtemp(join(tmpdir(), "deer-claude-backup-"));
+    try {
+      if (existsSync(claudeDir)) {
+        await cp(claudeDir, join(backupDir, ".claude"), { recursive: true });
+      }
+      if (existsSync(claudeJson)) {
+        await cp(claudeJson, join(backupDir, ".claude.json"));
+      }
+      await fn();
+    } finally {
+      if (existsSync(join(backupDir, ".claude"))) {
+        await rm(claudeDir, { recursive: true, force: true });
+        await cp(join(backupDir, ".claude"), claudeDir, { recursive: true });
+      }
+      if (existsSync(join(backupDir, ".claude.json"))) {
+        await cp(join(backupDir, ".claude.json"), claudeJson);
+      }
+      await rm(backupDir, { recursive: true, force: true });
+    }
+  }
+
   // ACCEPTED RISK: nono's claude-code profile grants rw to ~/.claude by design
-  // (Claude Code needs it for session state, hooks, etc.). Isolation via
-  // sandboxed HOME is being tracked upstream in nono.
-  test.skip("~/.claude must not be writable by sandboxed agent", async () => {
-    const home = process.env.HOME!;
-    const claudeDir = join(home, ".claude");
+  // (Claude Code needs it for session state, hooks, etc.).
+  // Tracked upstream: https://github.com/always-further/nono/issues/220
+  test.skip("~/.claude must not be writable by sandboxed agent", () =>
+    withClaudeBackup(async () => {
+      if (!existsSync(claudeDir)) {
+        console.log("Skipping: no ~/.claude found");
+        return;
+      }
 
-    if (!existsSync(claudeDir)) {
-      console.log("Skipping: no ~/.claude found");
-      return;
-    }
+      const dir = await makeTmpDir();
+      const marker = `deer-sec-test-${Date.now()}`;
+      const proc = nonoRun(
+        dir,
+        `echo malicious > ${claudeDir}/${marker} 2>&1; echo exit=$?`,
+      );
+      const stdout = await new Response(proc.stdout).text();
+      await proc.exited;
 
-    const dir = await makeTmpDir();
-    const marker = `deer-sec-test-${Date.now()}`;
-    const proc = nonoRun(
-      dir,
-      `echo malicious > ${claudeDir}/${marker} 2>&1; echo exit=$?`,
-    );
-    const stdout = await new Response(proc.stdout).text();
-    await proc.exited;
-
-    // ~/.claude is rw in the claude-code profile. If this test fails,
-    // a compromised agent can inject malicious hooks, MCP servers,
-    // or modify Claude Code settings that persist across sessions.
-    const escaped = existsSync(join(claudeDir, marker));
-    if (escaped) {
-      // Clean up the test artifact
-      await rm(join(claudeDir, marker)).catch(() => {});
-    }
-    expect(escaped).toBe(false);
-  });
+      // ~/.claude is rw in the claude-code profile. If this test fails,
+      // a compromised agent can inject malicious hooks, MCP servers,
+      // or modify Claude Code settings that persist across sessions.
+      expect(existsSync(join(claudeDir, marker))).toBe(false);
+    }),
+  );
 
   // ACCEPTED RISK: same as above — nono claude-code profile grants rw.
-  test.skip("~/.claude.json must not be writable by sandboxed agent", async () => {
-    const home = process.env.HOME!;
-    const claudeJson = join(home, ".claude.json");
+  // Tracked upstream: https://github.com/always-further/nono/issues/220
+  test.skip("~/.claude.json must not be writable by sandboxed agent", () =>
+    withClaudeBackup(async () => {
+      if (!existsSync(claudeJson)) {
+        console.log("Skipping: no ~/.claude.json found");
+        return;
+      }
 
-    if (!existsSync(claudeJson)) {
-      console.log("Skipping: no ~/.claude.json found");
-      return;
-    }
+      const dir = await makeTmpDir();
 
-    const dir = await makeTmpDir();
+      const proc = nonoRun(
+        dir,
+        `echo 'DEER_SECURITY_MARKER' >> ${claudeJson} 2>&1; echo exit=$?`,
+      );
+      const stdout = await new Response(proc.stdout).text();
+      await proc.exited;
 
-    // Use a non-destructive test: try to append to the file rather than
-    // overwriting it, so the test doesn't corrupt the real config.
-    const proc = nonoRun(
-      dir,
-      `echo 'DEER_SECURITY_MARKER' >> ${claudeJson} 2>&1; echo exit=$?`,
-    );
-    const stdout = await new Response(proc.stdout).text();
-    await proc.exited;
-
-    // Check the marker wasn't appended
-    const currentContent = await readFile(claudeJson, "utf-8");
-    const wasModified = currentContent.includes("DEER_SECURITY_MARKER");
-    if (wasModified) {
-      // Clean up: remove the marker line
-      const cleaned = currentContent.replace(/\nDEER_SECURITY_MARKER\n?/g, "");
-      await writeFile(claudeJson, cleaned);
-    }
-    expect(wasModified).toBe(false);
-  });
+      const currentContent = await readFile(claudeJson, "utf-8");
+      expect(currentContent).not.toContain("DEER_SECURITY_MARKER");
+    }),
+  );
 });
 
 // ── B6: Cargo/npm/pip registry cache as read vector ──────────────────
@@ -416,7 +427,7 @@ describe("package manager cache isolation", () => {
 
 describe("/tmp isolation between sandbox sessions", () => {
   // ACCEPTED RISK: nono shares the host's /tmp (no mount namespaces).
-  // Cross-sandbox /tmp leakage is a known nono limitation being tracked upstream.
+  // Cross-sandbox /tmp leakage is a known nono limitation. No upstream issue yet.
   test.skip("sandbox can write to /tmp (allowed by profile)", async () => {
     const dir = await makeTmpDir();
     const marker = `deer-sec-xsandbox-${Date.now()}`;

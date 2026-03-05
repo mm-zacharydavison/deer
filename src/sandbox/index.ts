@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { buildNonoArgs, type NonoOptions } from "./nono";
 
 export { buildNonoArgs, type NonoOptions } from "./nono";
@@ -53,6 +54,12 @@ export async function launchSandbox(options: SandboxOptions): Promise<SandboxSes
     extraWritePaths,
     command,
   } = options;
+
+  // Pre-create ~/.claude.json.lock so Landlock can attach a rule to it.
+  // Claude Code's saveConfigWithLock creates this file; without it,
+  // Landlock blocks creation (no MAKE_REG on ~/). See nono#220.
+  const lockFile = join(process.env.HOME ?? "/root", ".claude.json.lock");
+  await Bun.write(lockFile, "").catch(() => {});
 
   // Build the nono command
   const nonoArgs = buildNonoArgs({
