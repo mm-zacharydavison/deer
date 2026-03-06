@@ -100,5 +100,5 @@ export function useAgentSync(cwd: string, configRef: MutableRefObject<DeerConfig
     return () => clearInterval(interval);
   }, [syncWithHistory]);
 
-  return { agents, setAgents, agentsRef, nextId, deletedTaskIdsRef, baseBranchRef, restoredProxiesRef };
+  return { agents, setAgents, agentsRef, nextId, deletedTaskIdsRef, baseBranchRef, restoredProxiesRef, syncWithHistory };
 }

@@ -41,7 +41,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   const guardRef = useRef<ClaudeConfigGuard | null>(null);
   const configRef = useRef<DeerConfig | null>(null);
 
-  const { agents, setAgents, agentsRef, nextId, deletedTaskIdsRef, baseBranchRef, restoredProxiesRef } = useAgentSync(cwd, configRef);
+  const { agents, setAgents, agentsRef, nextId, deletedTaskIdsRef, baseBranchRef, restoredProxiesRef, syncWithHistory } = useAgentSync(cwd, configRef);
 
   const {
     promptHistory,
@@ -101,7 +101,12 @@ export default function Dashboard({ cwd }: { cwd: string }) {
 
   useEffect(() => {
     runPreflight().then(setPreflight);
-    loadConfig(cwd).then((cfg) => { configRef.current = cfg; });
+    loadConfig(cwd).then((cfg) => {
+      configRef.current = cfg;
+      // Re-run sync immediately so bwrap proxies are restored for any
+      // running cross-instance tasks without waiting for the 2s poll.
+      syncWithHistory();
+    });
     startClaudeConfigGuard((alert) => {
       setConfigAlerts((prev) => [...prev, alert]);
     }).then((guard) => {
@@ -113,10 +118,11 @@ export default function Dashboard({ cwd }: { cwd: string }) {
 
   useEffect(() => {
     const cleanup = () => {
+      // Abort deer's own polling loops so state updates stop, but leave the
+      // tmux sessions alive so agents continue running after a restart.
       for (const agent of agentsRef.current) {
-        if (isActive(agent) && agent.handle) {
+        if (isActive(agent)) {
           agent.abortController?.abort();
-          agent.handle.kill().catch(() => {});
         }
       }
       for (const proxyCleanup of restoredProxiesRef.current.values()) {
