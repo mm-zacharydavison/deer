@@ -1,4 +1,5 @@
 import { Box, Text, useInput, useApp, useStdout } from "ink";
+import { applyKittyData } from "./kitty-input";
 import { Spinner } from "@inkjs/ui";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { loadHistory, upsertHistory, removeFromHistory, loadPromptHistory, savePromptHistory, dataDir } from "./task";
@@ -266,15 +267,12 @@ function PromptInput({
     if (isDisabled) return;
     process.stdout.write("\x1b[>1u");
     const handleData = (data: Buffer) => {
-      if (data.toString() === "\x1b[13;2u") {
-        const cur = cursorOffsetRef.current;
-        const val = valueRef.current;
-        const newValue = val.slice(0, cur) + "\n" + val.slice(cur);
-        const newCursor = cur + 1;
-        valueRef.current = newValue;
-        cursorOffsetRef.current = newCursor;
-        setValue(newValue);
-        setCursorOffset(newCursor);
+      const result = applyKittyData(data.toString(), valueRef.current, cursorOffsetRef.current);
+      if (result) {
+        valueRef.current = result.value;
+        cursorOffsetRef.current = result.cursor;
+        setValue(result.value);
+        setCursorOffset(result.cursor);
       }
     };
     process.stdin.on("data", handleData);
