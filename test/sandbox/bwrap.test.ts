@@ -1,7 +1,7 @@
-import { test, expect, describe, afterEach } from "bun:test";
+import { test, expect, describe, afterEach, beforeEach } from "bun:test";
 import { createBwrapRuntime } from "../../src/sandbox/bwrap";
 import type { SandboxRuntimeOptions, SandboxCleanup } from "../../src/sandbox/runtime";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -88,6 +88,141 @@ describe("bwrapRuntime.buildCommand", () => {
     const sepIdx = args.indexOf("--");
     expect(sepIdx).toBeGreaterThan(0);
     expect(args.slice(sepIdx + 1)).toEqual(["claude", "--model", "sonnet"]);
+  });
+});
+
+describe("bwrap credential isolation", () => {
+  const tmpDirs: string[] = [];
+  const cleanups: SandboxCleanup[] = [];
+
+  afterEach(async () => {
+    for (const c of cleanups) c();
+    cleanups.length = 0;
+    for (const d of tmpDirs) {
+      await rm(d, { recursive: true, force: true }).catch(() => {});
+    }
+    tmpDirs.length = 0;
+  });
+
+  async function makeTmpDir(): Promise<string> {
+    const d = await mkdtemp(join(tmpdir(), "deer-bwrap-cred-test-"));
+    tmpDirs.push(d);
+    return d;
+  }
+
+  test("ANTHROPIC_BASE_URL points at API proxy after prepare()", async () => {
+    const dir = await makeTmpDir();
+    const runtime = createBwrapRuntime();
+    const cleanup = await runtime.prepare!({ worktreePath: dir, allowlist: [] });
+    cleanups.push(cleanup);
+
+    const args = runtime.buildCommand({ worktreePath: dir, allowlist: [] }, ["echo"]);
+    const baseUrlIdx = args.indexOf("ANTHROPIC_BASE_URL");
+    expect(baseUrlIdx).toBeGreaterThan(0);
+    expect(args[baseUrlIdx - 1]).toBe("--setenv");
+    expect(args[baseUrlIdx + 1]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
+  test("dummy ANTHROPIC_API_KEY is set (not a real sk-ant- key)", async () => {
+    const dir = await makeTmpDir();
+    const runtime = createBwrapRuntime();
+    const cleanup = await runtime.prepare!({ worktreePath: dir, allowlist: [] });
+    cleanups.push(cleanup);
+
+    const args = runtime.buildCommand({ worktreePath: dir, allowlist: [] }, ["echo"]);
+    const keyIdx = args.indexOf("ANTHROPIC_API_KEY");
+    expect(keyIdx).toBeGreaterThan(0);
+    expect(args[keyIdx - 1]).toBe("--setenv");
+    // Must not be a real Anthropic API key format
+    expect(args[keyIdx + 1]).not.toMatch(/^sk-ant-/);
+  });
+
+  test("real ANTHROPIC_API_KEY from host env is not passed through to sandbox args", async () => {
+    const originalKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-host-secret-key";
+
+    const dir = await makeTmpDir();
+    const runtime = createBwrapRuntime();
+    const cleanup = await runtime.prepare!({ worktreePath: dir, allowlist: [] });
+    cleanups.push(cleanup);
+
+    const args = runtime.buildCommand({ worktreePath: dir, allowlist: [] }, ["echo"]);
+    expect(args).not.toContain("sk-ant-host-secret-key");
+
+    process.env.ANTHROPIC_API_KEY = originalKey;
+  });
+
+  test(".credentials.json is masked inside the sandbox", async () => {
+    const fakeHome = await makeTmpDir();
+    const claudeDir = join(fakeHome, ".claude");
+    await mkdir(claudeDir, { recursive: true });
+    const credFile = join(claudeDir, ".credentials.json");
+    await writeFile(credFile, JSON.stringify({ claudeAiOauth: { accessToken: "secret-oauth-token" } }));
+
+    const dir = await makeTmpDir();
+    const runtime = createBwrapRuntime();
+
+    // Temporarily override HOME so bwrap picks up our fake home
+    const originalHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    const cleanup = await runtime.prepare!({ worktreePath: dir, allowlist: [] });
+    cleanups.push(cleanup);
+    const args = runtime.buildCommand({ worktreePath: dir, allowlist: [] }, ["echo"]);
+
+    process.env.HOME = originalHome;
+
+    // .credentials.json should be bound to an empty/masked source, not the real one
+    const credIdx = args.findIndex((a) => a === credFile);
+    expect(credIdx).toBeGreaterThan(0);
+    const sourceArg = args[credIdx - 1];
+    // The source must NOT be the real credentials file itself
+    expect(sourceArg).not.toBe(credFile);
+  });
+
+  test("primaryApiKey is absent from the mounted ~/.claude.json", async () => {
+    const fakeHome = await makeTmpDir();
+    const claudeJsonPath = join(fakeHome, ".claude.json");
+    await writeFile(claudeJsonPath, JSON.stringify({
+      primaryApiKey: "sk-ant-stored-key",
+      numStartups: 5,
+    }));
+
+    const dir = await makeTmpDir();
+    const runtime = createBwrapRuntime();
+
+    const originalHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    const cleanup = await runtime.prepare!({ worktreePath: dir, allowlist: [] });
+    cleanups.push(cleanup);
+    const args = runtime.buildCommand({ worktreePath: dir, allowlist: [] }, ["echo"]);
+
+    process.env.HOME = originalHome;
+
+    // Find what source file is bound at the ~/.claude.json target
+    const targetIdx = args.findIndex((a) => a === claudeJsonPath);
+    expect(targetIdx).toBeGreaterThan(0);
+    const sourceArg = args[targetIdx - 1];
+
+    // The source is a sanitized temp file — its content must not contain the real API key
+    const content = await readFile(sourceArg, "utf-8");
+    expect(content).not.toContain("sk-ant-stored-key");
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    expect(parsed.numStartups).toBe(5); // other config preserved
+  });
+
+  test("CLAUDE_CODE_OAUTH_TOKEN in env is not forwarded to sandbox", async () => {
+    const dir = await makeTmpDir();
+    const runtime = createBwrapRuntime();
+    const cleanup = await runtime.prepare!({ worktreePath: dir, allowlist: [] });
+    cleanups.push(cleanup);
+
+    const args = runtime.buildCommand(
+      { worktreePath: dir, allowlist: [], env: { CLAUDE_CODE_OAUTH_TOKEN: "my-oauth-token" } },
+      ["echo"],
+    );
+    expect(args).not.toContain("my-oauth-token");
   });
 });
 

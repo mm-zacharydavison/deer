@@ -1,5 +1,5 @@
 import { test, expect, describe, afterEach } from "bun:test";
-import { startProxy, matchesAllowlist, isPrivateIP, type ProxyHandle } from "../../src/sandbox/proxy";
+import { startProxy, startApiProxy, matchesAllowlist, isPrivateIP, type ProxyHandle } from "../../src/sandbox/proxy";
 import { createServer, type Server } from "node:net";
 
 describe("matchesAllowlist", () => {
@@ -254,6 +254,193 @@ describe("proxy server", () => {
     h.stop();
     handles.length = 0;
 
+    try {
+      await fetch(`http://127.0.0.1:${port}/`);
+      expect(true).toBe(false);
+    } catch {
+      // Expected — server is stopped
+    }
+  });
+});
+
+describe("startApiProxy", () => {
+  const apiHandles: ProxyHandle[] = [];
+  const upstreamServers: Server[] = [];
+
+  afterEach(async () => {
+    for (const h of apiHandles) h.stop();
+    apiHandles.length = 0;
+    for (const s of upstreamServers) s.close();
+    upstreamServers.length = 0;
+  });
+
+  /**
+   * Send an HTTP/1.1 request directly via TCP (bypasses HTTP_PROXY env var).
+   * Returns status code and response body.
+   */
+  function sendHttpRequest(
+    port: number,
+    method: string,
+    path: string,
+    body?: string,
+    extraHeaders?: Record<string, string>,
+  ): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+      const bodyBytes = body ? Buffer.from(body) : Buffer.alloc(0);
+      const headerLines = [
+        `${method} ${path} HTTP/1.1`,
+        `Host: 127.0.0.1:${port}`,
+        `Content-Length: ${bodyBytes.length}`,
+        "Connection: close",
+        ...Object.entries(extraHeaders ?? {}).map(([k, v]) => `${k}: ${v}`),
+        "",
+        "",
+      ].join("\r\n");
+
+      const req = headerLines + (body ?? "");
+
+      Bun.connect({
+        hostname: "127.0.0.1",
+        port,
+        socket: {
+          open(socket) {
+            socket.write(req);
+          },
+          data(socket, data) {
+            const text = Buffer.from(data).toString();
+            const sepIdx = text.indexOf("\r\n\r\n");
+            const headerSection = sepIdx >= 0 ? text.slice(0, sepIdx) : text;
+            const firstLine = headerSection.split("\r\n")[0];
+            const status = parseInt(firstLine.split(" ")[1] ?? "0");
+            const respBody = sepIdx >= 0 ? text.slice(sepIdx + 4) : "";
+            resolved = true;
+            resolve({ status, body: respBody });
+            socket.end();
+          },
+          close() {
+            if (!resolved) reject(new Error("closed before response"));
+          },
+          error(_, e) {
+            if (!resolved) reject(e);
+          },
+        },
+      });
+    });
+  }
+
+  /**
+   * Start a plain TCP server that records the raw request and returns a canned HTTP response.
+   * Used to inspect what headers the API proxy forwards upstream.
+   */
+  function startRecordingUpstream(
+    responseBody: string = "{}",
+    status: number = 200,
+  ): Promise<{ port: number; lastRequest: () => string }> {
+    let lastRequest = "";
+
+    const server = createServer((socket) => {
+      socket.on("data", (data) => {
+        lastRequest += data.toString();
+        // Once we have the full headers, send response
+        if (lastRequest.includes("\r\n\r\n")) {
+          socket.write(
+            `HTTP/1.1 ${status} OK\r\nContent-Type: application/json\r\nContent-Length: ${responseBody.length}\r\nConnection: close\r\n\r\n${responseBody}`,
+          );
+          socket.end();
+        }
+      });
+    });
+    upstreamServers.push(server);
+    return new Promise((resolve) => {
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address();
+        const port = typeof addr === "object" && addr ? addr.port : 0;
+        resolve({ port, lastRequest: () => lastRequest });
+      });
+    });
+  }
+
+  test("starts and returns a positive port", async () => {
+    const h = await startApiProxy({
+      credentials: { apiKey: "sk-ant-test" },
+    });
+    apiHandles.push(h);
+    expect(h.port).toBeGreaterThan(0);
+  });
+
+  test("injects x-api-key when apiKey credential provided", async () => {
+    const upstream = await startRecordingUpstream();
+    const h = await startApiProxy({
+      credentials: { apiKey: "sk-ant-real-key" },
+      upstreamBaseUrl: `http://127.0.0.1:${upstream.port}`,
+    });
+    apiHandles.push(h);
+
+    await sendHttpRequest(h.port, "POST", "/v1/messages", "{}");
+    expect(upstream.lastRequest()).toContain("x-api-key: sk-ant-real-key");
+  });
+
+  test("injects Authorization Bearer when oauthToken credential provided", async () => {
+    const upstream = await startRecordingUpstream();
+    const h = await startApiProxy({
+      credentials: { oauthToken: "oauth-token-xyz" },
+      upstreamBaseUrl: `http://127.0.0.1:${upstream.port}`,
+    });
+    apiHandles.push(h);
+
+    await sendHttpRequest(h.port, "POST", "/v1/messages", "{}");
+    expect(upstream.lastRequest()).toContain("authorization: Bearer oauth-token-xyz");
+  });
+
+  test("strips dummy x-api-key sent by sandbox and injects real key", async () => {
+    const upstream = await startRecordingUpstream();
+    const h = await startApiProxy({
+      credentials: { apiKey: "sk-ant-real-key" },
+      upstreamBaseUrl: `http://127.0.0.1:${upstream.port}`,
+    });
+    apiHandles.push(h);
+
+    // Sandbox sends its dummy key — proxy must replace with the real one
+    await sendHttpRequest(h.port, "POST", "/v1/messages", "{}", { "x-api-key": "deer-proxy-key" });
+    expect(upstream.lastRequest()).toContain("x-api-key: sk-ant-real-key");
+    expect(upstream.lastRequest()).not.toContain("deer-proxy-key");
+  });
+
+  test("forwards request body to upstream", async () => {
+    const upstream = await startRecordingUpstream();
+    const h = await startApiProxy({
+      credentials: { apiKey: "sk-ant-test" },
+      upstreamBaseUrl: `http://127.0.0.1:${upstream.port}`,
+    });
+    apiHandles.push(h);
+
+    await sendHttpRequest(h.port, "POST", "/v1/messages", '{"model":"claude-sonnet-4-6"}', {
+      "content-type": "application/json",
+    });
+    expect(upstream.lastRequest()).toContain('{"model":"claude-sonnet-4-6"}');
+  });
+
+  test("returns upstream response status and body", async () => {
+    const upstream = await startRecordingUpstream('{"error":"not_found"}', 404);
+    const h = await startApiProxy({
+      credentials: { apiKey: "sk-ant-test" },
+      upstreamBaseUrl: `http://127.0.0.1:${upstream.port}`,
+    });
+    apiHandles.push(h);
+
+    const res = await sendHttpRequest(h.port, "POST", "/v1/messages", "{}");
+    expect(res.status).toBe(404);
+    expect(res.body).toContain('{"error":"not_found"}');
+  });
+
+  test("stop() shuts down the API proxy", async () => {
+    const h = await startApiProxy({ credentials: { apiKey: "sk-ant-test" } });
+    const port = h.port;
+    h.stop();
+
+    // fetch() goes through HTTP_PROXY which in turn tries to CONNECT to our stopped
+    // server — the connection is refused, so fetch throws.
     try {
       await fetch(`http://127.0.0.1:${port}/`);
       expect(true).toBe(false);

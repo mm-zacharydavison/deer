@@ -1,6 +1,8 @@
 import { join, dirname } from "node:path";
 import { existsSync, lstatSync, readlinkSync, readdirSync, realpathSync } from "node:fs";
-import { startProxy } from "./proxy";
+import { readFile, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { startProxy, startApiProxy, type HostCredentials } from "./proxy";
 import type { SandboxRuntime, SandboxRuntimeOptions, SandboxCleanup } from "./runtime";
 
 /**
@@ -21,12 +23,75 @@ const SYSTEM_PATHS = [
 ];
 
 /**
+ * Read Anthropic credentials from the host environment and config files.
+ * Caller-supplied env vars take precedence over host env and config files.
+ */
+async function readHostCredentials(env?: Record<string, string>): Promise<HostCredentials> {
+  // Caller-supplied env takes highest precedence
+  if (env?.ANTHROPIC_API_KEY) return { apiKey: env.ANTHROPIC_API_KEY };
+  if (env?.CLAUDE_CODE_OAUTH_TOKEN) return { oauthToken: env.CLAUDE_CODE_OAUTH_TOKEN };
+
+  // Host environment
+  if (process.env.ANTHROPIC_API_KEY) return { apiKey: process.env.ANTHROPIC_API_KEY };
+
+  const home = process.env.HOME ?? "/root";
+
+  // OAuth token from ~/.claude/.credentials.json
+  const credentialsFile = join(home, ".claude", ".credentials.json");
+  try {
+    const raw = await readFile(credentialsFile, "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const oauth = parsed.claudeAiOauth as Record<string, unknown> | undefined;
+    const token = oauth?.accessToken as string | undefined;
+    if (token) return { oauthToken: token };
+  } catch {
+    // File absent or unreadable
+  }
+
+  // API key from ~/.claude.json
+  const claudeJsonPath = join(home, ".claude.json");
+  try {
+    const raw = await readFile(claudeJsonPath, "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const key = parsed.primaryApiKey as string | undefined;
+    if (key) return { apiKey: key };
+  } catch {
+    // File absent or unreadable
+  }
+
+  return {};
+}
+
+/**
+ * Write a sanitized copy of ~/.claude.json with credential fields removed.
+ * Returns the path to the temp file.
+ */
+async function createSanitizedClaudeJson(sourcePath: string): Promise<string> {
+  const tmpPath = join(tmpdir(), `deer-claude-sanitized-${Date.now()}.json`);
+  try {
+    const raw = await readFile(sourcePath, "utf-8");
+    const config = JSON.parse(raw) as Record<string, unknown>;
+    delete config.primaryApiKey;
+    delete config.oauthAccount;
+    await writeFile(tmpPath, JSON.stringify(config));
+  } catch {
+    await writeFile(tmpPath, "{}");
+  }
+  return tmpPath;
+}
+
+/** Env vars that carry credentials — intercepted by the API proxy, never passed to the sandbox */
+const CREDENTIAL_ENV_VARS = new Set(["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]);
+
+/**
  * Build the bwrap argument array for a given proxy port and options.
  */
 function buildBwrapArgs(
   options: SandboxRuntimeOptions,
   innerCommand: string[],
   proxyPort: number,
+  apiProxyPort: number,
+  sanitizedClaudeJsonPath: string | null,
 ): string[] {
   const { worktreePath, repoGitDir, extraReadPaths, extraWritePaths, env } = options;
   const home = process.env.HOME ?? "/root";
@@ -80,12 +145,25 @@ function buildBwrapArgs(
   if (existsSync(claudeDir)) {
     homeMounts.add(claudeDir);
     args.push("--bind", claudeDir, claudeDir);
+
+    // Mask credential files within ~/.claude/ — bind an empty temp file over
+    // them so the sandbox sees no tokens. Real credentials are injected by the
+    // API proxy running on the host side.
+    for (const credFile of [".credentials.json", "agent-oauth-token"]) {
+      const fullPath = join(claudeDir, credFile);
+      if (existsSync(fullPath)) {
+        // Use /dev/null — writes are silently discarded, reads return empty
+        args.push("--bind", "/dev/null", fullPath);
+      }
+    }
   }
 
-  // ~/.claude.json — Claude Code writes config and backup files here.
+  // ~/.claude.json — bind a sanitized copy (no primaryApiKey, no oauthAccount)
+  // at the original path. Real credentials are injected by the API proxy.
   const claudeJson = join(home, ".claude.json");
-  if (existsSync(claudeJson)) {
-    args.push("--bind", claudeJson, claudeJson);
+  const claudeJsonSource = sanitizedClaudeJsonPath ?? claudeJson;
+  if (existsSync(claudeJsonSource)) {
+    args.push("--bind", claudeJsonSource, claudeJson);
   }
 
   // Specific ~/.config sub-paths needed by tools (git, gh, deer).
@@ -157,16 +235,26 @@ function buildBwrapArgs(
   args.push("--die-with-parent");
   args.push("--chdir", worktreePath);
 
-  // Environment: proxy settings
+  // Environment: CONNECT proxy settings for network allowlisting
   if (proxyPort > 0) {
     const proxyUrl = `http://127.0.0.1:${proxyPort}`;
     args.push("--setenv", "HTTPS_PROXY", proxyUrl);
     args.push("--setenv", "HTTP_PROXY", proxyUrl);
   }
 
-  // Custom environment variables (e.g. CLAUDE_CODE_OAUTH_TOKEN)
+  // API proxy: redirect all Anthropic API calls to the host-side proxy that injects
+  // real credentials. The sandbox gets a dummy key so Claude Code can start, but it
+  // is not a real credential — the proxy strips it and substitutes the host's real key.
+  if (apiProxyPort > 0) {
+    args.push("--setenv", "ANTHROPIC_BASE_URL", `http://127.0.0.1:${apiProxyPort}`);
+    args.push("--setenv", "ANTHROPIC_API_KEY", "deer-proxy-key");
+  }
+
+  // Custom environment variables — credential vars are intercepted for the API
+  // proxy and must never be forwarded directly into the sandbox.
   if (env) {
     for (const [key, value] of Object.entries(env)) {
+      if (CREDENTIAL_ENV_VARS.has(key)) continue;
       args.push("--setenv", key, value);
     }
   }
@@ -211,21 +299,43 @@ function buildBwrapArgs(
  */
 export function createBwrapRuntime(): SandboxRuntime {
   let proxyPort = 0;
+  let apiProxyPort = 0;
+  let sanitizedClaudeJsonPath: string | null = null;
 
   return {
     name: "bwrap",
 
     async prepare(options: SandboxRuntimeOptions): Promise<SandboxCleanup> {
-      const proxy = await startProxy({ allowlist: options.allowlist });
+      const credentials = await readHostCredentials(options.env);
+
+      const [proxy, apiProxy] = await Promise.all([
+        startProxy({ allowlist: options.allowlist }),
+        startApiProxy({ credentials }),
+      ]);
       proxyPort = proxy.port;
-      return () => {
+      apiProxyPort = apiProxy.port;
+
+      // Create a sanitized ~/.claude.json without credential fields
+      const home = process.env.HOME ?? "/root";
+      const claudeJsonPath = join(home, ".claude.json");
+      if (existsSync(claudeJsonPath)) {
+        sanitizedClaudeJsonPath = await createSanitizedClaudeJson(claudeJsonPath);
+      }
+
+      return async () => {
         proxy.stop();
+        apiProxy.stop();
         proxyPort = 0;
+        apiProxyPort = 0;
+        if (sanitizedClaudeJsonPath) {
+          await rm(sanitizedClaudeJsonPath, { force: true }).catch(() => {});
+          sanitizedClaudeJsonPath = null;
+        }
       };
     },
 
     buildCommand(options: SandboxRuntimeOptions, innerCommand: string[]): string[] {
-      return buildBwrapArgs(options, innerCommand, proxyPort);
+      return buildBwrapArgs(options, innerCommand, proxyPort, apiProxyPort, sanitizedClaudeJsonPath);
     },
   };
 }
