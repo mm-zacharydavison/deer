@@ -26,6 +26,7 @@ export type AgentAction =
   | "attach"
   | "create_pr"
   | "open_pr"
+  | "update_pr"
   | "kill"
   | "delete"
   | "toggle_logs"
@@ -73,7 +74,7 @@ const ACTIONS_BY_STATE: Record<AgentState, AgentAction[]> = {
   setup:       ["kill", "delete", "toggle_logs"],
   running:     ["attach", "kill", "open_shell", "delete", "toggle_logs"],
   teardown:    ["open_shell", "delete", "toggle_logs"],
-  completed:   ["attach", "create_pr", "open_pr", "open_shell", "delete", "toggle_logs"],
+  completed:   ["attach", "create_pr", "open_pr", "update_pr", "open_shell", "delete", "toggle_logs"],
   failed:      ["retry", "open_shell", "delete", "toggle_logs"],
   cancelled:   ["open_shell", "delete", "toggle_logs"],
   interrupted: ["open_shell", "delete", "toggle_logs"],
@@ -85,6 +86,7 @@ export const ACTION_BINDINGS: Record<AgentAction, ActionBinding> = {
   attach:       { keyDisplay: "⏎", label: "attach" },
   create_pr:    { keyDisplay: "p", label: "create PR" },
   open_pr:      { keyDisplay: "p", label: "open PR" },
+  update_pr:    { keyDisplay: "u", label: "update PR" },
   kill:         { keyDisplay: "x", label: "kill" },
   delete:       { keyDisplay: "⌫", label: "delete" },
   toggle_logs:  { keyDisplay: "l", label: "logs" },
@@ -101,9 +103,9 @@ export const ACTION_BINDINGS: Record<AgentAction, ActionBinding> = {
  */
 export function availableActions(ctx: AgentContext): AgentAction[] {
   const base = [...ACTIONS_BY_STATE[ctx.status]];
-  // Idle agents can create PRs (Claude is alive but waiting for input)
+  // Idle agents can create or update PRs (Claude is alive but waiting for input)
   if (ctx.isIdle && !base.includes("create_pr")) {
-    base.push("create_pr", "open_pr");
+    base.push("create_pr", "open_pr", "update_pr");
   }
   return base.filter((action) => {
     switch (action) {
@@ -115,6 +117,8 @@ export function availableActions(ctx: AgentContext): AgentAction[] {
         return ctx.hasPrUrl;
       case "open_shell":
         return ctx.hasWorktreePath;
+      case "update_pr":
+        return ctx.hasPrUrl;
       case "delete":
         return true;
       default:
@@ -165,6 +169,7 @@ export function resolveKeypress(
     l: "toggle_logs",
     r: "retry",
     s: "open_shell",
+    u: "update_pr",
   };
 
   const action = charMap[input];
