@@ -712,7 +712,9 @@ export default function Dashboard({ cwd }: { cwd: string }) {
     } finally {
       if (agent.timer) clearInterval(agent.timer);
       agent.timer = null;
-      await saveToHistory(agent, cwd);
+      if (!agent.deleted) {
+        await saveToHistory(agent, cwd);
+      }
       setAgents((prev) => [...prev]);
     }
   }, [cwd, preflight]);
@@ -988,6 +990,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
             killAgent(agent);
             break;
           case "delete":
+            agent.deleted = true;
             agent.abortController?.abort();
             if (agent.timer) clearInterval(agent.timer);
             deleteTask(agent.taskId, cwd, agent.handle).catch(() => {});

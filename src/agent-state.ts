@@ -45,6 +45,8 @@ export interface AgentState {
   updatingPr: boolean;
   /** AbortController for cancelling the wait loop */
   abortController: AbortController | null;
+  /** True if this task has been explicitly deleted (suppresses history write on cleanup) */
+  deleted: boolean;
 }
 
 // ── Factory ──────────────────────────────────────────────────────────
@@ -70,6 +72,7 @@ export function createAgentState(overrides: Partial<AgentState>): AgentState {
     creatingPr: false,
     updatingPr: false,
     abortController: null,
+    deleted: false,
     ...overrides,
   };
 }
