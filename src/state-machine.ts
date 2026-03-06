@@ -74,10 +74,10 @@ const ACTIONS_BY_STATE: Record<AgentState, AgentAction[]> = {
   setup:       ["kill", "delete", "toggle_logs"],
   running:     ["attach", "kill", "open_shell", "delete", "toggle_logs"],
   teardown:    ["open_shell", "delete", "toggle_logs"],
-  completed:   ["attach", "create_pr", "open_pr", "update_pr", "open_shell", "delete", "toggle_logs"],
+  completed:   ["attach", "create_pr", "open_pr", "update_pr", "retry", "open_shell", "delete", "toggle_logs"],
   failed:      ["retry", "open_shell", "delete", "toggle_logs"],
-  cancelled:   ["open_shell", "delete", "toggle_logs"],
-  interrupted: ["open_shell", "delete", "toggle_logs"],
+  cancelled:   ["retry", "open_shell", "delete", "toggle_logs"],
+  interrupted: ["retry", "open_shell", "delete", "toggle_logs"],
 };
 
 // ── Action Bindings ──────────────────────────────────────────────────

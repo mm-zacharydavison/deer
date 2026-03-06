@@ -994,9 +994,20 @@ export default function Dashboard({ cwd }: { cwd: string }) {
           case "toggle_logs":
             setLogExpanded((prev) => !prev);
             break;
-          case "retry":
-            spawnAgent(agent.prompt);
+          case "retry": {
+            const retryPrompt = agent.prompt;
+            agent.abortController?.abort();
+            if (agent.timer) clearInterval(agent.timer);
+            deleteTask(agent.taskId, cwd, agent.handle).catch(() => {});
+            setAgents((prev) => prev.filter((a) => a !== agent));
+            setSelectedIdx((prev) => Math.min(prev, Math.max(visible.length - 2, 0)));
+            deletedTaskIdsRef.current.add(agent.taskId);
+            removeFromHistory(cwd, agent.taskId).finally(() => {
+              deletedTaskIdsRef.current.delete(agent.taskId);
+            });
+            spawnAgent(retryPrompt);
             break;
+          }
           case "open_shell":
             openShell(agent);
             break;

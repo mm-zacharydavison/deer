@@ -176,24 +176,33 @@ describe("availableActions", () => {
     expect(actions).toContain("toggle_logs");
   });
 
-  test("retry is not available in non-failed states", () => {
-    for (const status of ["setup", "running", "teardown", "completed", "cancelled", "interrupted"] as const) {
+  test("retry is not available in active states", () => {
+    for (const status of ["setup", "running", "teardown"] as const) {
       const actions = availableActions(baseCtx({ status }));
       expect(actions).not.toContain("retry");
     }
   });
 
-  test("cancelled state has delete, toggle_logs", () => {
+  test("retry is available in all terminal states", () => {
+    for (const status of ["failed", "completed", "cancelled", "interrupted"] as const) {
+      const actions = availableActions(baseCtx({ status }));
+      expect(actions).toContain("retry");
+    }
+  });
+
+  test("cancelled state has retry, delete, toggle_logs", () => {
     const actions = availableActions(baseCtx({
       status: "cancelled",
       hasHandle: true,
     }));
+    expect(actions).toContain("retry");
     expect(actions).toContain("delete");
     expect(actions).toContain("toggle_logs");
   });
 
-  test("interrupted state has delete, toggle_logs", () => {
+  test("interrupted state has retry, delete, toggle_logs", () => {
     const actions = availableActions(baseCtx({ status: "interrupted" }));
+    expect(actions).toContain("retry");
     expect(actions).toContain("delete");
     expect(actions).toContain("toggle_logs");
     expect(actions).not.toContain("attach");
