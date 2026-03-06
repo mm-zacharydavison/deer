@@ -19,11 +19,11 @@ export interface RepoInfo {
  */
 export async function detectRepo(startDir: string): Promise<RepoInfo> {
   const result =
-    await Bun.$`git -C ${startDir} rev-parse --show-toplevel`.quiet();
+    await Bun.$`git -C ${startDir} rev-parse --show-toplevel`.quiet().nothrow();
 
   if (result.exitCode !== 0) {
     throw new Error(
-      `Not a git repository (searched from ${startDir}): ${result.stderr.toString()}`
+      `Not a git repository (searched from ${startDir})`
     );
   }
 
