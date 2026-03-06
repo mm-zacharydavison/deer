@@ -123,11 +123,16 @@ describe("availableActions", () => {
     expect(actions).toContain("toggle_logs");
   });
 
-  test("retry is not available in active states", () => {
-    for (const status of ["setup", "running", "teardown"] as const) {
+  test("retry is not available in setup or teardown", () => {
+    for (const status of ["setup", "teardown"] as const) {
       const actions = availableActions(baseCtx({ status }));
       expect(actions).not.toContain("retry");
     }
+  });
+
+  test("retry is available in running state (with confirmation)", () => {
+    const actions = availableActions(baseCtx({ status: "running" }));
+    expect(actions).toContain("retry");
   });
 
   test("retry is available in all terminal states", () => {
@@ -167,12 +172,12 @@ describe("availableActions", () => {
     expect(actions).toContain("kill");
   });
 
-  test("non-idle running state does not have retry", () => {
+  test("non-idle running state has retry (with confirmation)", () => {
     const actions = availableActions(baseCtx({
       status: "running",
       isIdle: false,
     }));
-    expect(actions).not.toContain("retry");
+    expect(actions).toContain("retry");
   });
 
   test("idle running state has open_pr when PR exists", () => {

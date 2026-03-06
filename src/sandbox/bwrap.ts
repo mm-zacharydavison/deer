@@ -156,6 +156,7 @@ function buildBwrapArgs(
 
   // Process isolation
   args.push("--die-with-parent");
+  args.push("--clearenv");
   args.push("--chdir", worktreePath);
 
   // Environment: proxy settings
