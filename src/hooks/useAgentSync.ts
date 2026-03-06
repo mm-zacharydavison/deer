@@ -1,16 +1,23 @@
+import { join } from "node:path";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { loadHistory } from "../task";
+import type { MutableRefObject } from "react";
+import { loadHistory, dataDir } from "../task";
 import { isTmuxSessionDead } from "../sandbox/index";
+import type { SandboxCleanup } from "../sandbox/index";
+import { resolveRuntime } from "../sandbox/resolve";
 import { detectRepo } from "../git/worktree";
 import { type AgentState, historicalAgent, crossInstanceAgent } from "../agent-state";
+import type { DeerConfig } from "../config";
 
-export function useAgentSync(cwd: string) {
+export function useAgentSync(cwd: string, configRef: MutableRefObject<DeerConfig | null>) {
   const [agents, setAgents] = useState<AgentState[]>([]);
   const nextId = useRef(1);
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
   const deletedTaskIdsRef = useRef(new Set<string>());
   const baseBranchRef = useRef("main");
+  /** Proxy cleanup functions for cross-instance tasks restored after a restart */
+  const restoredProxiesRef = useRef(new Map<string, SandboxCleanup>());
 
   // ── Detect base branch on mount ────────────────────────────────────
 
@@ -42,9 +49,23 @@ export function useAgentSync(cwd: string) {
       if (task.status === "running") {
         const isDead = await isTmuxSessionDead(`deer-${task.taskId}`);
         if (!isDead) {
+          // Restore the bwrap proxy once per task so the sandbox can reach
+          // the Claude API after a deer restart.
+          if (!restoredProxiesRef.current.has(task.taskId) && configRef.current) {
+            const runtime = resolveRuntime(configRef.current);
+            const worktreePath = join(dataDir(), "tasks", task.taskId, "worktree");
+            const cleanup = await runtime.restoreProxy?.(worktreePath, configRef.current.network.allowlist);
+            if (cleanup) restoredProxiesRef.current.set(task.taskId, cleanup);
+          }
           return crossInstanceAgent(task, id);
         }
-        // Session is dead — fall through to historicalAgent (shows as interrupted)
+        // Session died — stop any proxy we restored for this task
+        const proxyCleanup = restoredProxiesRef.current.get(task.taskId);
+        if (proxyCleanup) {
+          proxyCleanup();
+          restoredProxiesRef.current.delete(task.taskId);
+        }
+        // Fall through to historicalAgent (shows as interrupted)
       }
 
       return historicalAgent(task, id);
@@ -79,5 +100,5 @@ export function useAgentSync(cwd: string) {
     return () => clearInterval(interval);
   }, [syncWithHistory]);
 
-  return { agents, setAgents, agentsRef, nextId, deletedTaskIdsRef, baseBranchRef };
+  return { agents, setAgents, agentsRef, nextId, deletedTaskIdsRef, baseBranchRef, restoredProxiesRef };
 }

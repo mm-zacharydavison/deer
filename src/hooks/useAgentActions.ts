@@ -63,7 +63,7 @@ export function useAgentActions({
 
   // ── Spawn agent ───────────────────────────────────────────────────
 
-  const spawnAgent = useCallback(async (prompt: string, baseBranch?: string) => {
+  const spawnAgent = useCallback(async (prompt: string, baseBranch?: string, continueSession?: { taskId: string; worktreePath: string; branch: string }) => {
     if (!prompt.trim()) return;
     if (preflight && !preflight.ok) return;
 
@@ -81,9 +81,9 @@ export function useAgentActions({
     const abortController = new AbortController();
     agent.abortController = abortController;
 
-    // Start elapsed timer
+    // Start elapsed timer — pauses while agent is idle
     agent.timer = setInterval(() => {
-      agent.elapsed++;
+      if (!agent.idle) agent.elapsed++;
       setAgents((prev) => [...prev]);
     }, 1000);
 
@@ -91,7 +91,7 @@ export function useAgentActions({
 
     try {
       // Phase 1: Start the sandboxed agent
-      appendLog(agent, "[setup] Creating worktree and sandbox...");
+      appendLog(agent, continueSession ? "[setup] Resuming session..." : "[setup] Creating worktree and sandbox...");
       agent.lastActivity = "Setting up sandbox...";
       setAgents((prev) => [...prev]);
 
@@ -102,6 +102,7 @@ export function useAgentActions({
         config,
         model: MODEL,
         runtime: resolveRuntime(config),
+        continueSession,
         onStatus: (status) => {
           const detail = "message" in status ? status.message : status.phase;
           appendLog(agent, `[setup] ${detail}`);

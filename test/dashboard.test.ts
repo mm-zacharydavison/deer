@@ -3,6 +3,7 @@ import { historicalAgent, crossInstanceAgent, createAgentState } from "../src/ag
 import { generateTaskId } from "../src/task";
 import type { PersistedTask } from "../src/task";
 import { fuzzyMatch } from "../src/fuzzy";
+import { applyKittyData } from "../src/kitty-input";
 
 function makeTask(overrides?: Partial<PersistedTask>): PersistedTask {
   return {
@@ -19,6 +20,36 @@ function makeTask(overrides?: Partial<PersistedTask>): PersistedTask {
     ...overrides,
   };
 }
+
+describe("applyKittyData", () => {
+  test("Shift+Enter inserts newline at cursor", () => {
+    expect(applyKittyData("\x1b[13;2u", "hello", 5)).toEqual({ value: "hello\n", cursor: 6 });
+  });
+
+  test("Shift+Enter inserts newline mid-string", () => {
+    expect(applyKittyData("\x1b[13;2u", "hello world", 5)).toEqual({ value: "hello\n world", cursor: 6 });
+  });
+
+  test("backspace (\\x1b[127;1u) deletes char before cursor", () => {
+    expect(applyKittyData("\x1b[127;1u", "hello", 5)).toEqual({ value: "hell", cursor: 4 });
+  });
+
+  test("backspace (\\x1b[127u) deletes char before cursor", () => {
+    expect(applyKittyData("\x1b[127u", "hello", 5)).toEqual({ value: "hell", cursor: 4 });
+  });
+
+  test("backspace mid-string deletes correct char", () => {
+    expect(applyKittyData("\x1b[127;1u", "hello", 3)).toEqual({ value: "helo", cursor: 2 });
+  });
+
+  test("backspace at start of string returns null", () => {
+    expect(applyKittyData("\x1b[127;1u", "hello", 0)).toBeNull();
+  });
+
+  test("returns null for unknown sequences", () => {
+    expect(applyKittyData("\x1b[1;2A", "hello", 5)).toBeNull();
+  });
+});
 
 describe("fuzzyMatch", () => {
   test("matches exact substring", () => {

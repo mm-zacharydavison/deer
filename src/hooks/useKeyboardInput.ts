@@ -16,7 +16,7 @@ interface KeyboardInputDeps {
   setHistoryIdx: Dispatch<SetStateAction<number>>;
   setInputDefault: Dispatch<SetStateAction<string>>;
   setInputKey: Dispatch<SetStateAction<number>>;
-  spawnAgent: (prompt: string) => Promise<void>;
+  spawnAgent: (prompt: string, baseBranch?: string, continueSession?: { taskId: string; worktreePath: string; branch: string }) => Promise<void>;
   killAgent: (agent: AgentState) => void;
   attachToAgent: (agent: AgentState) => Promise<void>;
   openShell: (agent: AgentState) => Promise<void>;
@@ -211,9 +211,25 @@ export function useKeyboardInput({
             break;
           case "retry": {
             const retryPrompt = agent.prompt;
-            deleteAgent(agent);
+            const retryHandle = agent.handle;
+            agent.abortController?.abort();
+            if (agent.timer) clearInterval(agent.timer);
             setSelectedIdx((prev) => Math.min(prev, Math.max(agents.length - 2, 0)));
-            spawnAgent(retryPrompt);
+
+            if (retryHandle) {
+              // Kill the tmux session but preserve the worktree so Claude can
+              // continue the same conversation with --continue.
+              retryHandle.kill().catch(() => {});
+              setAgents((prev) => prev.filter((a) => a !== agent));
+              spawnAgent(retryPrompt, agent.baseBranch, {
+                taskId: retryHandle.taskId,
+                worktreePath: retryHandle.worktreePath,
+                branch: retryHandle.branch,
+              });
+            } else {
+              deleteAgent(agent);
+              spawnAgent(retryPrompt, agent.baseBranch);
+            }
             break;
           }
           case "open_shell":

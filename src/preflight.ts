@@ -1,6 +1,7 @@
 export interface PreflightResult {
   ok: boolean;
   errors: string[];
+  credentialType: "subscription" | "api-token" | "none";
 }
 
 export async function runPreflight(): Promise<PreflightResult> {
@@ -42,7 +43,7 @@ export async function runPreflight(): Promise<PreflightResult> {
     errors.push("gh CLI not available");
   }
 
-  // Check OAuth token
+  // Check credentials — OAuth token preferred, API key accepted as fallback
   const tokenFile = `${process.env.HOME ?? ""}/.claude/agent-oauth-token`;
   if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     try {
@@ -52,9 +53,18 @@ export async function runPreflight(): Promise<PreflightResult> {
       }
     } catch { /* ignore */ }
   }
-  if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    errors.push("No OAuth token — set CLAUDE_CODE_OAUTH_TOKEN or create ~/.claude/agent-oauth-token");
+  // Strip API key if OAuth is now available (OAuth always wins)
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    delete process.env.ANTHROPIC_API_KEY;
+  }
+  let credentialType: PreflightResult["credentialType"] = "none";
+  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    credentialType = "subscription";
+  } else if (process.env.ANTHROPIC_API_KEY) {
+    credentialType = "api-token";
+  } else {
+    errors.push("No credentials — set CLAUDE_CODE_OAUTH_TOKEN, create ~/.claude/agent-oauth-token, or set ANTHROPIC_API_KEY");
   }
 
-  return { ok: errors.length === 0, errors };
+  return { ok: errors.length === 0, errors, credentialType };
 }

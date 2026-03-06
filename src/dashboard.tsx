@@ -41,7 +41,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   const guardRef = useRef<ClaudeConfigGuard | null>(null);
   const configRef = useRef<DeerConfig | null>(null);
 
-  const { agents, setAgents, agentsRef, nextId, deletedTaskIdsRef, baseBranchRef } = useAgentSync(cwd);
+  const { agents, setAgents, agentsRef, nextId, deletedTaskIdsRef, baseBranchRef, restoredProxiesRef } = useAgentSync(cwd, configRef);
 
   const {
     promptHistory,
@@ -118,6 +118,10 @@ export default function Dashboard({ cwd }: { cwd: string }) {
           agent.handle.kill().catch(() => {});
         }
       }
+      for (const proxyCleanup of restoredProxiesRef.current.values()) {
+        proxyCleanup();
+      }
+      restoredProxiesRef.current.clear();
     };
 
     process.on("exit", cleanup);
@@ -339,41 +343,48 @@ export default function Dashboard({ cwd }: { cwd: string }) {
 
       {/* Footer / keybindings */}
       <Text>{"─".repeat(termWidth)}</Text>
-      <Box paddingX={1} gap={2}>
-        {searchMode ? (
-          <>
-            <Text dimColor>j/k nav</Text>
-            <Text dimColor>⏎ select</Text>
-            <Text dimColor>Esc cancel</Text>
-          </>
-        ) : confirmQuit ? (
-          <Text color="yellow" bold>
-            {activeCount} agent{activeCount !== 1 ? "s" : ""} running — quit? (y/n)
+      <Box paddingX={1} gap={2} justifyContent="space-between">
+        <Box gap={2}>
+          {searchMode ? (
+            <>
+              <Text dimColor>j/k nav</Text>
+              <Text dimColor>⏎ select</Text>
+              <Text dimColor>Esc cancel</Text>
+            </>
+          ) : confirmQuit ? (
+            <Text color="yellow" bold>
+              {activeCount} agent{activeCount !== 1 ? "s" : ""} running — quit? (y/n)
+            </Text>
+          ) : (
+            <>
+              <Text dimColor>Tab focus</Text>
+              {inputFocused ? null : (
+                <>
+                  <Text dimColor>j/k nav</Text>
+                  <Text dimColor>/ search</Text>
+                  {selected && availableActions({
+                    status: selected.status,
+                    hasPrUrl: !!selected.result?.prUrl,
+                    hasFinalBranch: !!selected.result?.finalBranch || !!selected.handle?.branch,
+                    hasHandle: !!selected.handle,
+                    isIdle: selected.idle,
+                    prState: selected.prState,
+                    hasWorktreePath: !!selected.taskId,
+                  }).map((action) => (
+                    <Text key={action} dimColor>
+                      {ACTION_BINDINGS[action].keyDisplay} {ACTION_BINDINGS[action].label}
+                    </Text>
+                  ))}
+                  <Text dimColor>q quit</Text>
+                </>
+              )}
+            </>
+          )}
+        </Box>
+        {preflight && (
+          <Text dimColor={preflight.credentialType !== "none"} color={preflight.credentialType === "none" ? "red" : undefined}>
+            {preflight.credentialType === "subscription" ? "subscription" : preflight.credentialType === "api-token" ? "api-token" : "no credentials"}
           </Text>
-        ) : (
-          <>
-            <Text dimColor>Tab focus</Text>
-            {inputFocused ? null : (
-              <>
-                <Text dimColor>j/k nav</Text>
-                <Text dimColor>/ search</Text>
-                {selected && availableActions({
-                  status: selected.status,
-                  hasPrUrl: !!selected.result?.prUrl,
-                  hasFinalBranch: !!selected.result?.finalBranch || !!selected.handle?.branch,
-                  hasHandle: !!selected.handle,
-                  isIdle: selected.idle,
-                  prState: selected.prState,
-                  hasWorktreePath: !!selected.taskId,
-                }).map((action) => (
-                  <Text key={action} dimColor>
-                    {ACTION_BINDINGS[action].keyDisplay} {ACTION_BINDINGS[action].label}
-                  </Text>
-                ))}
-                <Text dimColor>q quit</Text>
-              </>
-            )}
-          </>
         )}
       </Box>
     </Box>
