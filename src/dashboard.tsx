@@ -503,7 +503,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   // ── Animate upload icon when creating PR ─────────────────────────
 
   useEffect(() => {
-    const anyCreating = agents.some((a) => a.creatingPr);
+    const anyCreating = agents.some((a) => a.creatingPr || a.updatingPr);
     if (!anyCreating) return;
     const interval = setInterval(() => setAnimTick((t) => t + 1), 200);
     return () => clearInterval(interval);
@@ -973,6 +973,9 @@ export default function Dashboard({ cwd }: { cwd: string }) {
             break;
           case "open_pr":
             if (agent.result?.prUrl) openUrl(agent.result.prUrl);
+            break;
+          case "update_pr":
+            updatePr(agent);
             break;
           case "kill":
             killAgent(agent);

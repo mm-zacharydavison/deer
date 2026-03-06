@@ -118,7 +118,7 @@ export function availableActions(ctx: AgentContext): AgentAction[] {
       case "open_shell":
         return ctx.hasWorktreePath;
       case "update_pr":
-        return ctx.hasPrUrl;
+        return ctx.hasPrUrl && ctx.hasHandle && ctx.prState !== "merged" && ctx.prState !== "closed";
       case "delete":
         return true;
       default:
