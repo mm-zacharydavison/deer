@@ -122,7 +122,8 @@ export async function launchSandbox(options: SandboxOptions): Promise<SandboxSes
     .map(([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`)
     .join("; ");
 
-  const preamble = `${envExports}; unset CLAUDECODE; exec ${escapedCmd}`;
+  // Disable XON/XOFF flow control so attaching a terminal client cannot stall Claude's output.
+  const preamble = `${envExports}; unset CLAUDECODE; stty -ixon 2>/dev/null || true; exec ${escapedCmd}`;
 
   // Create tmux session with a clean environment (env -i).
   // The preamble re-exports only the allowed vars.
