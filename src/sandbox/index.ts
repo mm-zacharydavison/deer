@@ -120,7 +120,7 @@ export async function launchSandbox(options: SandboxOptions): Promise<SandboxSes
     ["status-position", "bottom"],
     ["status-style", "#{?client_prefix,bg=#4a4a6e fg=#ffffff,bg=#1a1a2e fg=#e0e0e0}"],
     ["status-left", ""],
-    ["status-right", " 🦌 deer | Ctrl+b [ to scroll | Ctrl+b d to detach "],
+    ["status-right", " 🦌 deer | Ctrl+b d to detach "],
     ["status-right-style", "#{?client_prefix,bg=#4a4a6e fg=#ffffff,bg=#1a1a2e fg=#888888}"],
     ["status-justify", "left"],
   ];
