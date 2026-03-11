@@ -1,0 +1,29 @@
+src/components/PromptInput.tsx
+  ff90a0a3992fc8d2 90-96,99-100
+src/sandbox/auth-proxy.ts
+  ff90a0a3992fc8d2 25-26,29,49-59,61-67,80
+package.json
+  ff90a0a3992fc8d2 19
+scripts/build.ts
+  ff90a0a3992fc8d2 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "0178447fd81b6202daa1190ca73fef820e30844c",
+  "prompts": {
+    "ff90a0a3992fc8d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e75daffe-df54-497f-a2e3-d620258eff9e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "deer-agent <deer@noreply>",
+      "messages": [],
+      "total_additions": 73,
+      "total_deletions": 19,
+      "accepted_lines": 61,
+      "overriden_lines": 0
+    }
+  }
+}
