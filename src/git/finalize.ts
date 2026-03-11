@@ -55,6 +55,8 @@ export interface UpdatePROptions {
   prompt: string;
   /** @example "https://github.com/org/repo/pull/42" */
   prUrl: string;
+  /** Verbose log callback for diagnostics */
+  onLog?: (message: string) => void;
 }
 
 interface PRMetadata {
@@ -314,23 +316,37 @@ export async function pushBranchUpdates(options: PushBranchOptions): Promise<voi
  * PR title and body from the latest diff.
  */
 export async function updatePullRequest(options: UpdatePROptions): Promise<void> {
-  const { repoPath, worktreePath, finalBranch, baseBranch, prompt, prUrl } = options;
+  const { repoPath, worktreePath, finalBranch, baseBranch, prompt, prUrl, onLog } = options;
+  const log = onLog ?? (() => {});
 
   // Remove deer internal files before staging
   await Bun.$`rm -rf ${worktreePath}/.deer-claude-config ${worktreePath}/.deer-prompt`.quiet().nothrow();
 
+  log(`[pr] Staging and committing changes...`);
   await stageAndCommit(worktreePath);
+
+  log(`[pr] Pushing branch ${finalBranch}...`);
   await pushBranch(worktreePath, finalBranch);
+  log(`[pr] Push succeeded`);
 
   // Regenerate PR metadata from the updated diff
+  log(`[pr] Finding PR template...`);
   const prTemplate = await findPRTemplate(repoPath);
-  const metadata = await generatePRMetadata(worktreePath, baseBranch, prompt, prTemplate);
+  log(`[pr] PR template: ${prTemplate ? "found" : "none"}`);
+
+  log(`[pr] Generating PR metadata via Claude...`);
+  const metadata = await generatePRMetadata(worktreePath, baseBranch, prompt, prTemplate, onLog);
+  log(`[pr] Metadata: title=${metadata.title}`);
 
   // Update the PR title and body
+  log(`[pr] Running gh pr edit ${prUrl}...`);
   const editResult = await Bun.$`gh pr edit ${prUrl} --title ${metadata.title} --body ${metadata.body}`.cwd(repoPath).quiet().nothrow();
   if (editResult.exitCode !== 0) {
-    throw new Error(`PR update failed: ${editResult.stderr.toString().trim()}`);
+    const stderr = editResult.stderr.toString().trim();
+    log(`[pr] gh pr edit failed (exit ${editResult.exitCode}): ${stderr}`);
+    throw new Error(`PR update failed: ${stderr}`);
   }
+  log(`[pr] PR updated: ${prUrl}`);
 }
 
 /**

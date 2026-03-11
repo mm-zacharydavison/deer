@@ -413,6 +413,8 @@ export function useAgentActions({
 
     agent.updatingPr = true;
     agent.lastActivity = "Updating PR...";
+    appendLog(agent, `[pr] Starting PR update...`, true);
+    appendLog(agent, `[pr] worktreePath=${worktreePath} branch=${agent.result.finalBranch} baseBranch=${agent.baseBranch}`, true);
     setAgents((prev) => [...prev]);
 
     try {
@@ -423,10 +425,16 @@ export function useAgentActions({
         baseBranch: agent.baseBranch,
         prompt: agent.prompt,
         prUrl: agent.result.prUrl,
+        onLog: (msg) => {
+          appendLog(agent, msg, true);
+          setAgents((prev) => [...prev]);
+        },
       });
       agent.lastActivity = "PR updated";
+      appendLog(agent, `[pr] PR updated: ${agent.result.prUrl}`, true);
     } catch (err) {
-      agent.lastActivity = `PR update failed: ${err instanceof Error ? err.message : String(err)}`;
+      const msg = err instanceof Error ? err.message : String(err);
+      agent.lastActivity = `PR update failed: ${truncate(msg, 120)}`;
     } finally {
       agent.updatingPr = false;
     }
