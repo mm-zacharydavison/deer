@@ -1,0 +1,23 @@
+src/git/finalize.ts
+  787b5b943b2c9cfc 129-132,153,161-162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "08883de5d5ef172b949147e2fc7500aeb98f0d21",
+  "prompts": {
+    "787b5b943b2c9cfc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b48934e6-f4f3-4984-9717-a24e3669876c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "deer-agent <deer@noreply>",
+      "messages": [],
+      "total_additions": 8,
+      "total_deletions": 0,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    }
+  }
+}
