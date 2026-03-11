@@ -111,6 +111,9 @@ export function useAgentSync(cwd: string, configRef: MutableRefObject<DeerConfig
       }
     }
 
+    // Sort oldest → newest so the list is stable and doesn't jump around
+    newAgents.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
     const changed =
       newAgents.length !== currentAgents.length ||
       newAgents.some((a, i) => {
