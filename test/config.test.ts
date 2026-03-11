@@ -20,9 +20,8 @@ describe("loadConfig", () => {
 
     expect(config.defaults.agent).toBe("claude");
     expect(config.defaults.timeoutMs).toBe(1800000);
-    expect(config.network.allowlist).toBeArrayOfSize(8);
+    expect(config.network.allowlist).toBeArrayOfSize(5);
     expect(config.network.allowlist).toContain("api.anthropic.com");
-    expect(config.network.allowlist).toContain("github.com");
     expect(config.network.allowlist).toContain("registry.npmjs.org");
   });
 
@@ -134,18 +133,15 @@ describe("DEFAULT_CONFIG", () => {
       "statsig.anthropic.com",
       "sentry.io",
       "registry.npmjs.org",
-      "pypi.org",
-      "github.com",
-      "objects.githubusercontent.com",
     ]);
   });
 
-  test("has default env_passthrough list", () => {
+  test("has empty default env_passthrough (credentials go through proxy)", () => {
     expect(DEFAULT_CONFIG.sandbox.envPassthrough).toBeArray();
-    expect(DEFAULT_CONFIG.sandbox.envPassthrough).toContain("CLAUDE_CODE_OAUTH_TOKEN");
-    // GH_TOKEN is intentionally NOT in the default list — agents don't need
-    // it because deer handles git push/PR creation outside the sandbox.
-    expect(DEFAULT_CONFIG.sandbox.envPassthrough).not.toContain("GH_TOKEN");
+    expect(DEFAULT_CONFIG.sandbox.envPassthrough).toHaveLength(0);
+    // Credentials are now handled by proxyCredentials, not envPassthrough
+    expect(DEFAULT_CONFIG.sandbox.proxyCredentials).toBeArray();
+    expect(DEFAULT_CONFIG.sandbox.proxyCredentials.length).toBeGreaterThan(0);
   });
 });
 
@@ -171,9 +167,7 @@ env_passthrough_extra = ["CUSTOM_API_KEY", "MY_SECRET"]
 
     const config = await loadConfig(tmpDir);
 
-    // Default vars still present
-    expect(config.sandbox.envPassthrough).toContain("CLAUDE_CODE_OAUTH_TOKEN");
-    // Extra vars appended
+    // Extra vars appended to the (now empty) default list
     expect(config.sandbox.envPassthrough).toContain("CUSTOM_API_KEY");
     expect(config.sandbox.envPassthrough).toContain("MY_SECRET");
   });

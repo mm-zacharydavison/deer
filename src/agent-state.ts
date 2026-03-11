@@ -9,6 +9,11 @@ interface TeardownResult {
   prUrl: string;
 }
 
+export interface LogEntry {
+  text: string;
+  verbose: boolean;
+}
+
 export interface AgentState {
   /** Persistent task ID (deer_xxx format) for history storage and React key */
   taskId: string;
@@ -20,8 +25,8 @@ export interface AgentState {
   elapsed: number;
   /** Last activity from tmux pane capture */
   lastActivity: string;
-  /** Log lines (capped) */
-  logs: string[];
+  /** Log entries (capped) */
+  logs: LogEntry[];
   /** Teardown result */
   result: TeardownResult | null;
   /** Error message on failure */

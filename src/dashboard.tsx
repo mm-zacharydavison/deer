@@ -3,7 +3,8 @@ import { Spinner } from "@inkjs/ui";
 import React, { useState, useEffect, useRef } from "react";
 import { loadConfig } from "./config";
 import type { DeerConfig } from "./config";
-import { availableActions, ACTION_BINDINGS } from "./state-machine";
+import { ShortcutsBar } from "./components/ShortcutsBar";
+import { LogDetailPanel } from "./components/LogDetailPanel";
 import { runPreflight, type PreflightResult } from "./preflight";
 import { PromptInput } from "./components/PromptInput";
 import { useAgentSync } from "./hooks/useAgentSync";
@@ -71,6 +72,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
     setInputFocused,
     confirmQuit,
     pendingConfirmation,
+    verboseMode,
     searchMode,
     searchQuery,
     searchMatchIdx,
@@ -79,6 +81,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
     suspended,
     agents,
     setAgents,
+    logExpanded,
     setLogExpanded,
     promptHistory,
     historyIdx,
@@ -150,7 +153,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   const selected = agents[clampedIdx] || null;
   const preflightOk = preflight?.ok ?? false;
 
-  const chromeHeight = 6;
+  const chromeHeight = 8;
   const detailHeight = logExpanded && selected ? Math.min(MAX_VISIBLE_LOGS + 1, 6) : 0;
   const listHeight = Math.max(termHeight - chromeHeight - detailHeight, 3);
   const hasPrEntries = agents.some((a) => a.result?.prUrl);
@@ -205,7 +208,8 @@ export default function Dashboard({ cwd }: { cwd: string }) {
             const isSelected = searchMode ? isSearchSelected : (i === clampedIdx && !inputFocused);
             const pointer = isSelected ? "▸" : (isSearchMatch ? "·" : " ");
 
-            const recentLogs = agent.logs.slice(-LOG_LINES_PER_ENTRY);
+            const filteredLogs = verboseMode ? agent.logs : agent.logs.filter((l) => !l.verbose);
+            const recentLogs = filteredLogs.slice(-LOG_LINES_PER_ENTRY);
             const titleOverhead = 11;
             const prBadge = agent.result?.prUrl && agent.prState
               ? {
@@ -253,10 +257,10 @@ export default function Dashboard({ cwd }: { cwd: string }) {
                   </Box>
                 )}
                 {/* Log lines */}
-                {recentLogs.map((line, j) => (
+                {recentLogs.map((entry, j) => (
                   <Box key={j} paddingLeft={3}>
                     <Text dimColor wrap="truncate">
-                      {truncate(line, logWidth)}
+                      {truncate(entry.text, logWidth)}
                     </Text>
                   </Box>
                 ))}
@@ -267,28 +271,14 @@ export default function Dashboard({ cwd }: { cwd: string }) {
       </Box>
 
       {/* Log detail panel */}
-      {logExpanded && selected && (() => {
-        const extraLines = (selected.result?.prUrl ? 1 : 0) + (selected.error ? 1 : 0);
-        const visibleLogs = Math.max(MAX_VISIBLE_LOGS - extraLines, 1);
-        return (
-          <Box flexDirection="column" paddingX={1} height={detailHeight} overflowY="hidden">
-            <Text dimColor>{"╌".repeat(termWidth - 2)}</Text>
-            {selected.logs.slice(-visibleLogs).map((line, i) => (
-              <Text key={i} dimColor wrap="truncate">
-                {truncate(line, termWidth - 4)}
-              </Text>
-            ))}
-            {selected.result?.prUrl && (
-              <Text color={prStateColor(selected.prState)} bold>
-                PR ({selected.prState ?? "checking…"}): {selected.result.prUrl}
-              </Text>
-            )}
-            {selected.error && (
-              <Text color="red">{truncate(selected.error, termWidth - 4)}</Text>
-            )}
-          </Box>
-        );
-      })()}
+      {logExpanded && selected && (
+        <LogDetailPanel
+          agent={selected}
+          height={detailHeight}
+          termWidth={termWidth}
+          verboseMode={verboseMode}
+        />
+      )}
 
       {/* Input divider + input bar */}
       <Text>{"─".repeat(termWidth)}</Text>
@@ -332,48 +322,16 @@ export default function Dashboard({ cwd }: { cwd: string }) {
         )}
       </Box>
 
-      {/* Footer / keybindings */}
+      {/* Footer / keybindings (fixed 3-line height) */}
       <Text>{"─".repeat(termWidth)}</Text>
-      <Box paddingX={1} gap={2} justifyContent="space-between">
-        <Box gap={2}>
-          {searchMode ? (
-            <>
-              <Text dimColor>j/k nav</Text>
-              <Text dimColor>⏎ select</Text>
-              <Text dimColor>Esc cancel</Text>
-            </>
-          ) : (
-            <>
-              <Text dimColor>Tab focus</Text>
-              {inputFocused ? null : (
-                <>
-                  <Text dimColor>j/k nav</Text>
-                  <Text dimColor>/ search</Text>
-                  {selected && availableActions({
-                    status: selected.status,
-                    hasPrUrl: !!selected.result?.prUrl,
-                    hasFinalBranch: !!selected.result?.finalBranch || !!selected.branch,
-                    hasHandle: selected.status === "running",
-                    isIdle: selected.idle,
-                    prState: selected.prState,
-                    hasWorktreePath: !!selected.taskId,
-                  }).map((action) => (
-                    <Text key={action} dimColor>
-                      {ACTION_BINDINGS[action].keyDisplay} {ACTION_BINDINGS[action].label}
-                    </Text>
-                  ))}
-                  <Text dimColor>q quit</Text>
-                </>
-              )}
-            </>
-          )}
-        </Box>
-        {preflight && (
-          <Text dimColor={preflight.credentialType !== "none"} color={preflight.credentialType === "none" ? "red" : undefined}>
-            {preflight.credentialType === "subscription" ? "subscription" : preflight.credentialType === "api-token" ? "api-token" : "no credentials"}
-          </Text>
-        )}
-      </Box>
+      <ShortcutsBar
+        selected={selected}
+        inputFocused={inputFocused}
+        searchMode={searchMode}
+        verboseMode={verboseMode}
+        logExpanded={logExpanded}
+        preflight={preflight}
+      />
     </Box>
   );
 }

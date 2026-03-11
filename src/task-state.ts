@@ -2,6 +2,7 @@ import { mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDir } from "./task";
 import type { TaskMetadata } from "./task";
+import type { LogEntry } from "./agent-state";
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -13,7 +14,7 @@ import type { TaskMetadata } from "./task";
  */
 export interface TaskStateFile extends TaskMetadata {
   /** Capped ring buffer of recent log lines */
-  logs: string[];
+  logs: LogEntry[];
   /** True when Claude is idle (waiting for user input) */
   idle: boolean;
   /** ISO 8601 timestamp */

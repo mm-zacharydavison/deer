@@ -214,6 +214,9 @@ export function useAgentActions({
           agent.lastActivity = detail;
           setAgents((prev) => [...prev]);
         },
+        onProxyLog: (message) => {
+          appendLog(agent, message, true);
+        },
       });
 
       // Sync worktree/branch from handle (for fresh starts)

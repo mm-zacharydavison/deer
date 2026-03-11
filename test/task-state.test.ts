@@ -30,7 +30,7 @@ function makeStateFile(overrides?: Partial<TaskStateFile>): TaskStateFile {
     finalBranch: "deer/deer_test01",
     prUrl: null,
     error: null,
-    logs: ["[setup] Creating worktree...", "[running] Claude started"],
+    logs: [{ text: "[setup] Creating worktree...", verbose: false }, { text: "[running] Claude started", verbose: false }],
     idle: false,
     createdAt: new Date().toISOString(),
     ownerPid: process.pid,

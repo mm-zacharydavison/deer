@@ -5,13 +5,13 @@
  * within a tmux session. The user can attach at any time via tmux.
  */
 
-import { join, resolve } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { createWorktree, removeWorktree } from "./git/worktree";
 import { cleanupWorktree } from "./git/finalize";
 import { launchSandbox, captureTmuxPane } from "./sandbox/index";
 import type { SandboxSession, SandboxRuntime } from "./sandbox/index";
 import { generateTaskId, dataDir } from "./task";
-import type { DeerConfig } from "./config";
+import type { DeerConfig, ProxyCredential } from "./config";
 import {
   DEFAULT_MODEL,
   BYPASS_DIALOG_MAX_POLLS,
@@ -65,6 +65,8 @@ export interface AgentRunOptions {
    * to Claude instead of the prompt.
    */
   continueSession?: ContinueSession;
+  /** Callback for auth proxy log messages (shown in the TUI log panel) */
+  onProxyLog?: (message: string) => void;
 }
 
 export type AgentStatus =
@@ -78,7 +80,9 @@ export type AgentStatus =
 /**
  * Build an env object containing only the vars from the passthrough list.
  * Vars not set in the host environment are omitted.
- * OAuth takes precedence: ANTHROPIC_API_KEY is excluded if CLAUDE_CODE_OAUTH_TOKEN is present.
+ *
+ * Credentials handled by proxyCredentials are NOT included here — they stay
+ * on the host and are injected by the auth proxy.
  */
 function buildPassthroughEnv(passthrough: string[]): Record<string, string> {
   const env: Record<string, string> = {};
@@ -88,10 +92,56 @@ function buildPassthroughEnv(passthrough: string[]): Record<string, string> {
       env[name] = value;
     }
   }
-  if (env.CLAUDE_CODE_OAUTH_TOKEN) {
-    delete env.ANTHROPIC_API_KEY;
-  }
   return env;
+}
+
+/**
+ * Resolve proxy credentials from config: read host env vars, build upstream
+ * definitions with concrete header values.
+ *
+ * When multiple credentials target the same domain (e.g. OAuth vs API key
+ * for Anthropic), the first one whose env var is set wins.
+ *
+ * Returns upstreams (for the MITM proxy), sandbox env vars, and placeholder
+ * env vars that make the sandboxed tool enter the right auth mode.
+ */
+export function resolveProxyUpstreams(
+  credentials: ProxyCredential[],
+): {
+  upstreams: import("./sandbox/auth-proxy").ProxyUpstream[];
+  sandboxEnv: Record<string, string>;
+  placeholderEnv: Record<string, string>;
+} {
+  const upstreams: import("./sandbox/auth-proxy").ProxyUpstream[] = [];
+  const sandboxEnv: Record<string, string> = {};
+  const placeholderEnv: Record<string, string> = {};
+  const claimedDomains = new Set<string>();
+
+  for (const cred of credentials) {
+    // Only one credential per domain — first match wins (e.g. OAuth before API key)
+    if (claimedDomains.has(cred.domain)) continue;
+
+    const value = process.env[cred.hostEnv.key];
+    if (!value) continue;
+
+    // Build concrete headers from templates
+    const headers: Record<string, string> = {};
+    for (const [hdr, tmpl] of Object.entries(cred.headerTemplate)) {
+      headers[hdr] = tmpl.replace("${value}", value);
+    }
+
+    upstreams.push({
+      domain: cred.domain,
+      target: cred.target,
+      headers,
+    });
+
+    sandboxEnv[cred.sandboxEnv.key] = cred.sandboxEnv.value;
+    placeholderEnv[cred.hostEnv.key] = "proxy-managed";
+    claimedDomains.add(cred.domain);
+  }
+
+  return { upstreams, sandboxEnv, placeholderEnv };
 }
 
 /**
@@ -142,6 +192,7 @@ export async function startAgent(options: AgentRunOptions): Promise<AgentHandle>
     runtime,
     onStatus,
     continueSession,
+    onProxyLog,
   } = options;
 
   const taskId = options.taskId ?? continueSession?.taskId ?? generateTaskId();
@@ -169,12 +220,37 @@ export async function startAgent(options: AgentRunOptions): Promise<AgentHandle>
 
   onStatus?.({ phase: "setup", message: "Starting sandbox..." });
 
+  // Resolve credentials → MITM proxy upstreams + sandbox env vars.
+  // Credentials stay on the host; the sandbox gets HTTP base URLs that
+  // route through SRT's proxy → our MITM proxy → real HTTPS upstream.
+  const { startAuthProxy } = await import("./sandbox/auth-proxy");
+  const { upstreams, sandboxEnv, placeholderEnv } =
+    resolveProxyUpstreams(config.sandbox.proxyCredentials);
+
+  let authProxy: import("./sandbox/auth-proxy").AuthProxy | null = null;
+  let mitmProxy: { socketPath: string; domains: string[] } | undefined;
+  if (upstreams.length > 0) {
+    const socketPath = join(dirname(worktreePath), `deer-auth-${taskId}.sock`);
+    authProxy = await startAuthProxy(socketPath, upstreams, onProxyLog);
+    mitmProxy = { socketPath: authProxy.socketPath, domains: authProxy.domains };
+  }
+
   // Build the Claude command — interactive mode (no -p) so users can
   // attach to the tmux session and observe/intervene.
   // When continuing, use --continue to resume the previous conversation.
   const claudeCmd = continueSession
     ? ["claude", "--dangerously-skip-permissions", "--model", model, "--continue"]
     : ["claude", "--dangerously-skip-permissions", "--model", model, prompt];
+
+  // Merge passthrough env (non-secret vars), proxy base URLs, and placeholder
+  // env vars. Placeholders make the sandboxed tool enter the right auth mode
+  // (e.g. CLAUDE_CODE_OAUTH_TOKEN=proxy-managed → OAuth mode) without
+  // exposing the real credential. The MITM proxy replaces them before forwarding.
+  const sandboxEnvFinal = {
+    ...buildPassthroughEnv(config.sandbox.envPassthrough),
+    ...placeholderEnv,
+    ...sandboxEnv,
+  };
 
   let sandbox: SandboxSession;
   try {
@@ -183,11 +259,13 @@ export async function startAgent(options: AgentRunOptions): Promise<AgentHandle>
       worktreePath,
       repoGitDir: resolve(repoPath, ".git"),
       allowlist: config.network.allowlist,
-      env: buildPassthroughEnv(config.sandbox.envPassthrough),
+      env: sandboxEnvFinal,
+      mitmProxy,
       command: claudeCmd,
       runtime,
     });
   } catch (err) {
+    await authProxy?.close();
     // Only clean up worktree on sandbox failure if we created it
     if (!continueSession) {
       await removeWorktree(repoPath, worktreePath).catch(() => {});
@@ -209,6 +287,7 @@ export async function startAgent(options: AgentRunOptions): Promise<AgentHandle>
     branch,
     async kill() {
       await sandbox.stop();
+      await authProxy?.close();
     },
   };
 }

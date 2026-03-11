@@ -2,6 +2,38 @@ import TOML from "@iarna/toml";
 import { join } from "node:path";
 import { HOME } from "./constants";
 
+/**
+ * Maps a host env var to auth headers injected by the host-side MITM proxy.
+ *
+ * The sandbox never sees the real credential. SRT's proxy forwards matching
+ * domains through a Unix socket to our MITM proxy, which injects the real
+ * auth headers and forwards to the upstream over HTTPS.
+ */
+export interface ProxyCredential {
+  /** Domain to intercept (e.g. "api.anthropic.com") */
+  domain: string;
+  /** Target origin for the real upstream (e.g. "https://api.anthropic.com") */
+  target: string;
+  /** Host environment variable that holds the credential */
+  hostEnv: { key: string };
+  /** Header name → template. Use `${value}` for the env var value. */
+  headerTemplate: Record<string, string>;
+  /**
+   * Environment variable config for the sandbox.
+   *
+   * - `key`: env var name to set (e.g. "ANTHROPIC_BASE_URL")
+   * - `value`: env var value, using HTTP so requests route through SRT's
+   *   proxy as plain HTTP (e.g. "http://api.anthropic.com")
+   *
+   * Additionally, `hostEnv.key` is injected into the sandbox as
+   * `"proxy-managed"` so the sandboxed tool thinks it has credentials.
+   */
+  sandboxEnv: {
+    key: string;
+    value: string;
+  };
+}
+
 export interface DeerConfig {
   defaults: {
     agent: "claude";
@@ -25,9 +57,16 @@ export interface DeerConfig {
     /**
      * Environment variable names to forward from the host into the sandbox.
      * Only these vars (plus PATH, HOME, TERM) reach the sandboxed process.
-     * @default ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+     * Credentials listed in proxyCredentials are NOT passed through — they
+     * are kept on the host and injected by the auth proxy.
      */
     envPassthrough: string[];
+    /**
+     * Credentials proxied via the host-side auth proxy.
+     * Each entry maps a host env var to an upstream API + auth header.
+     * The sandbox receives a localhost base URL instead of the raw credential.
+     */
+    proxyCredentials: ProxyCredential[];
   };
 }
 
@@ -47,9 +86,28 @@ export const DEFAULT_CONFIG: DeerConfig = {
   },
   sandbox: {
     runtime: "srt",
-    envPassthrough: [
-      "CLAUDE_CODE_OAUTH_TOKEN",
-      "ANTHROPIC_API_KEY",
+    envPassthrough: [],
+    proxyCredentials: [
+      {
+        domain: "api.anthropic.com",
+        target: "https://api.anthropic.com",
+        hostEnv: { key: "CLAUDE_CODE_OAUTH_TOKEN" },
+        headerTemplate: { authorization: "Bearer ${value}" },
+        sandboxEnv: {
+          key: "ANTHROPIC_BASE_URL",
+          value: "http://api.anthropic.com",
+        },
+      },
+      {
+        domain: "api.anthropic.com",
+        target: "https://api.anthropic.com",
+        hostEnv: { key: "ANTHROPIC_API_KEY" },
+        headerTemplate: { "x-api-key": "${value}" },
+        sandboxEnv: {
+          key: "ANTHROPIC_BASE_URL",
+          value: "http://api.anthropic.com",
+        },
+      },
     ],
   },
 };
@@ -126,6 +184,12 @@ function applyRepoLocal(config: DeerConfig, repoLocal: Record<string, unknown>):
       ...(sandbox.env_passthrough_extra as string[]),
     ];
   }
+  if (sandbox?.proxy_credentials_extra && Array.isArray(sandbox.proxy_credentials_extra)) {
+    result.sandbox.proxyCredentials = [
+      ...result.sandbox.proxyCredentials,
+      ...(sandbox.proxy_credentials_extra as ProxyCredential[]),
+    ];
+  }
 
   return result;
 }
@@ -200,6 +264,7 @@ function tomlToConfig(toml: Record<string, unknown>): Partial<DeerConfig> {
     result.sandbox = {
       ...(sandbox.runtime !== undefined && { runtime: sandbox.runtime }),
       ...(sandbox.env_passthrough !== undefined && { envPassthrough: sandbox.env_passthrough }),
+      ...(sandbox.proxy_credentials !== undefined && { proxyCredentials: sandbox.proxy_credentials }),
     };
   }
 

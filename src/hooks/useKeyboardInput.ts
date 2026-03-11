@@ -10,6 +10,7 @@ interface KeyboardInputDeps {
   suspended: boolean;
   agents: AgentState[];
   setAgents: Dispatch<SetStateAction<AgentState[]>>;
+  logExpanded: boolean;
   setLogExpanded: Dispatch<SetStateAction<boolean>>;
   promptHistory: string[];
   historyIdx: number;
@@ -27,10 +28,20 @@ interface KeyboardInputDeps {
   exit: () => void;
 }
 
+function copyLogsToClipboard(agent: AgentState): void {
+  const text = agent.logs.map((l) => l.text).join("\n");
+  const cmd = process.platform === "darwin" ? "pbcopy" : "xclip -selection clipboard";
+  const [bin, ...args] = cmd.split(" ");
+  const proc = Bun.spawn([bin, ...args], { stdin: "pipe" });
+  proc.stdin.write(text);
+  proc.stdin.end();
+}
+
 export function useKeyboardInput({
   suspended,
   agents,
   setAgents,
+  logExpanded,
   setLogExpanded,
   promptHistory,
   historyIdx,
@@ -55,6 +66,7 @@ export function useKeyboardInput({
     agent: AgentState;
     message: string;
   } | null>(null);
+  const [verboseMode, setVerboseMode] = useState(false);
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMatchIdx, setSearchMatchIdx] = useState(0);
@@ -196,6 +208,7 @@ export function useKeyboardInput({
         isIdle: agent.idle,
         prState: agent.prState,
         hasWorktreePath: !!agent.taskId,
+        logExpanded,
       };
       const actions = availableActions(ctx);
       const action = resolveKeypress(input, key as Parameters<typeof resolveKeypress>[1], actions);
@@ -235,6 +248,12 @@ export function useKeyboardInput({
       case "toggle_logs":
         setLogExpanded((prev) => !prev);
         break;
+      case "copy_logs":
+        copyLogsToClipboard(agent);
+        break;
+      case "toggle_verbose":
+        setVerboseMode((prev) => !prev);
+        break;
       case "retry":
         setSelectedIdx((prev) => Math.min(prev, Math.max(agents.length - 2, 0)));
         retryAgent(agent);
@@ -270,6 +289,7 @@ export function useKeyboardInput({
     setInputFocused,
     confirmQuit,
     pendingConfirmation,
+    verboseMode,
     searchMode,
     searchQuery,
     searchMatchIdx,

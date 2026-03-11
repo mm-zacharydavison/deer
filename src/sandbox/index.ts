@@ -36,6 +36,11 @@ export interface SandboxOptions {
   command: string[];
   /** Sandbox runtime to use */
   runtime: SandboxRuntime;
+  /**
+   * MITM proxy configuration for credential injection.
+   * When set, SRT routes matching domains through this Unix socket proxy.
+   */
+  mitmProxy?: { socketPath: string; domains: string[] };
 }
 
 /**
@@ -127,10 +132,11 @@ export async function launchSandbox(options: SandboxOptions): Promise<SandboxSes
     extraWritePaths,
     command,
     runtime,
+    mitmProxy,
   } = options;
 
   // Run runtime-specific pre-launch setup (e.g. start a proxy)
-  const runtimeOpts = { worktreePath, repoGitDir, allowlist, extraReadPaths, extraWritePaths, env };
+  const runtimeOpts = { worktreePath, repoGitDir, allowlist, extraReadPaths, extraWritePaths, env, mitmProxy };
   const cleanup: SandboxCleanup = await runtime.prepare?.(runtimeOpts) ?? (() => {});
 
   // Build the full sandboxed command via the runtime

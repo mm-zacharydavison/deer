@@ -23,6 +23,15 @@ export interface SandboxRuntimeOptions {
   extraWritePaths?: string[];
   /** Extra environment variables to inject into the sandbox */
   env?: Record<string, string>;
+  /**
+   * MITM proxy configuration for credential injection.
+   * When set, SRT routes matching domains through this Unix socket proxy
+   * which injects auth headers before forwarding to the real upstream.
+   */
+  mitmProxy?: {
+    socketPath: string;
+    domains: string[];
+  };
 }
 
 /** Cleanup function returned by prepare() to tear down runtime resources */

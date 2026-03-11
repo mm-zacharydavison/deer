@@ -1,4 +1,5 @@
 import { join, dirname } from "node:path";
+import { readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { SandboxRuntime, SandboxRuntimeOptions, SandboxCleanup } from "./runtime";
 import { HOME } from "../constants";
@@ -17,28 +18,59 @@ function resolveSrtBin(): string {
 }
 
 /**
+ * Enumerate $HOME entries and return denyRead paths for everything
+ * except .claude* (which Claude Code needs to function).
+ */
+function buildHomeDenyList(): string[] {
+  try {
+    const entries = readdirSync(HOME);
+    return entries
+      .filter((name) => !name.startsWith(".claude"))
+      .map((name) => join(HOME, name));
+  } catch {
+    // Fallback to known sensitive paths if HOME is unreadable
+    return [
+      join(HOME, ".ssh"),
+      join(HOME, ".aws"),
+      join(HOME, ".azure"),
+      join(HOME, ".config"),
+      join(HOME, ".docker"),
+      join(HOME, ".kube"),
+      join(HOME, ".npmrc"),
+      join(HOME, ".pypirc"),
+      join(HOME, ".git-credentials"),
+    ];
+  }
+}
+
+/**
  * Build an SRT settings JSON object from deer's sandbox options.
  */
 function buildSrtSettings(options: SandboxRuntimeOptions): Record<string, unknown> {
   const claudeDir = join(HOME, ".claude");
 
+  const network: Record<string, unknown> = {
+    allowedDomains: options.allowlist,
+    deniedDomains: [],
+  };
+
+  if (options.mitmProxy) {
+    network.mitmProxy = {
+      socketPath: options.mitmProxy.socketPath,
+      domains: options.mitmProxy.domains,
+    };
+    // The Unix socket must be accessible from inside the sandbox
+    network.allowUnixSockets = [dirname(options.mitmProxy.socketPath)];
+  }
+
+  // Deny read access to all HOME entries except .claude* (which Claude Code needs).
+  // Dynamically enumerated so new dotfiles/dirs are automatically blocked.
+  const denyRead = buildHomeDenyList();
+
   return {
-    network: {
-      allowedDomains: options.allowlist,
-      deniedDomains: [],
-    },
+    network,
     filesystem: {
-      denyRead: [
-        join(HOME, ".ssh"),
-        join(HOME, ".aws"),
-        join(HOME, ".azure"),
-        join(HOME, ".config/gcloud"),
-        join(HOME, ".docker/config.json"),
-        join(HOME, ".kube/config"),
-        join(HOME, ".npmrc"),
-        join(HOME, ".pypirc"),
-        join(HOME, ".git-credentials"),
-      ],
+      denyRead,
       allowWrite: [
         options.worktreePath,
         claudeDir,

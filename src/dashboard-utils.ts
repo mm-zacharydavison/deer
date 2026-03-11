@@ -26,8 +26,8 @@ export function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export function appendLog(agent: AgentState, line: string) {
-  agent.logs.push(line);
+export function appendLog(agent: AgentState, line: string, verbose = false) {
+  agent.logs.push({ text: line, verbose });
   if (agent.logs.length > MAX_LOG_LINES) {
     agent.logs.splice(0, agent.logs.length - MAX_LOG_LINES);
   }

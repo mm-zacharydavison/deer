@@ -166,7 +166,11 @@ describe("liveTaskFromStateFile", () => {
   });
 
   test("carries over logs from state file", () => {
-    const logs = ["[setup] Creating worktree...", "[running] Claude started", "● Fixing the issue"];
+    const logs = [
+      { text: "[setup] Creating worktree...", verbose: false },
+      { text: "[running] Claude started", verbose: true },
+      { text: "● Fixing the issue", verbose: false },
+    ];
     const agent = liveTaskFromStateFile(makeStateFile({ logs }));
     expect(agent.logs).toEqual(logs);
   });
@@ -203,7 +207,10 @@ describe("historicalAgentFromStateFile", () => {
   });
 
   test("carries over logs from state file", () => {
-    const logs = ["[setup] Creating worktree...", "● Some progress"];
+    const logs = [
+      { text: "[setup] Creating worktree...", verbose: false },
+      { text: "● Some progress", verbose: true },
+    ];
     const agent = historicalAgentFromStateFile(makeStateFile({ logs }));
     expect(agent.logs).toEqual(logs);
   });

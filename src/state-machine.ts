@@ -29,6 +29,8 @@ export type AgentAction =
   | "kill"
   | "delete"
   | "toggle_logs"
+  | "copy_logs"
+  | "toggle_verbose"
   | "retry"
   | "open_shell";
 
@@ -40,6 +42,7 @@ export interface AgentContext {
   isIdle: boolean;
   prState: "open" | "merged" | "closed" | null;
   hasWorktreePath: boolean;
+  logExpanded?: boolean;
 }
 
 interface ActionBinding {
@@ -87,6 +90,8 @@ export const ACTION_BINDINGS: Record<AgentAction, ActionBinding> = {
   kill:         { keyDisplay: "x", label: "kill" },
   delete:       { keyDisplay: "⌫", label: "delete" },
   toggle_logs:  { keyDisplay: "l", label: "logs" },
+  copy_logs:    { keyDisplay: "c", label: "copy" },
+  toggle_verbose: { keyDisplay: "v", label: "verbose" },
   retry:        { keyDisplay: "r", label: "retry" },
   open_shell:   { keyDisplay: "s", label: "shell" },
 };
@@ -104,6 +109,11 @@ export function availableActions(ctx: AgentContext): AgentAction[] {
   if (ctx.isIdle && !base.includes("create_pr")) {
     base.push("create_pr", "open_pr", "update_pr", "retry");
   }
+  // copy_logs and toggle_verbose are available when the log panel is open
+  if (ctx.logExpanded) {
+    if (!base.includes("copy_logs")) base.push("copy_logs");
+    if (!base.includes("toggle_verbose")) base.push("toggle_verbose");
+  }
   return base.filter((action) => {
     switch (action) {
       case "attach":
@@ -116,6 +126,9 @@ export function availableActions(ctx: AgentContext): AgentAction[] {
         return ctx.hasWorktreePath;
       case "update_pr":
         return ctx.hasPrUrl && ctx.hasHandle && ctx.prState !== "merged" && ctx.prState !== "closed";
+      case "copy_logs":
+      case "toggle_verbose":
+        return ctx.logExpanded;
       case "delete":
         return true;
       default:
@@ -197,6 +210,8 @@ export function resolveKeypress(
   const charMap: Record<string, AgentAction> = {
     x: "kill",
     l: "toggle_logs",
+    c: "copy_logs",
+    v: "toggle_verbose",
     r: "retry",
     s: "open_shell",
     u: "update_pr",
