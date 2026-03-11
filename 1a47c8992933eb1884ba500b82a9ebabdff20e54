@@ -1,0 +1,90 @@
+src/sandbox/runtime.ts
+  a2c1b1578778d493 26-34
+src/agent-state.ts
+  a2c1b1578778d493 12-16,28-29
+src/hooks/useKeyboardInput.ts
+  a2c1b1578778d493 13,31-39,44,69,211,251-256,292
+test/dashboard.test.ts
+  68feaa05b660c1a7 170-172,211-212
+test/sandbox/auth-proxy.test.ts
+  a2c1b1578778d493 1-164
+src/hooks/useAgentActions.ts
+  a2c1b1578778d493 217-219
+test/task-state.test.ts
+  68feaa05b660c1a7 33
+src/config.ts
+  a2c1b1578778d493 5-36,60-61,64-69,89-110,187-192,267
+test/config.test.ts
+  a2c1b1578778d493 23,139,141-144,170
+src/components/LogDetailPanel.tsx
+  68feaa05b660c1a7 1-37
+src/dashboard-utils.ts
+  a2c1b1578778d493 29-30
+src/sandbox/auth-proxy.ts
+  a2c1b1578778d493 1-122
+src/agent.ts
+  a2c1b1578778d493 8,14,68-69,84-85,98-144,195,223-237,245-253,262-263,268,290
+src/sandbox/srt.ts
+  a2c1b1578778d493 2,21-45,52-69
+src/sandbox/index.ts
+  a2c1b1578778d493 39-43,135,139
+src/state-machine.ts
+  a2c1b1578778d493 32-33,45,93-94,112-116,129-131,213-214
+test/security/api-key-isolation.test.ts
+  a2c1b1578778d493 2,4-6,10-12,34,40-42,48,50-52,64-66,77-143,146-260
+src/sandbox/auth-proxy-server.mjs
+  a2c1b1578778d493 1-112
+src/components/ShortcutsBar.tsx
+  68feaa05b660c1a7 1-121
+src/dashboard.tsx
+  a2c1b1578778d493 75,84,156,211-212,260,263,325,328-329,333
+  68feaa05b660c1a7 6-7,274-280,327,330-332
+src/task-state.ts
+  a2c1b1578778d493 5,17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "1a47c8992933eb1884ba500b82a9ebabdff20e54",
+  "prompts": {
+    "0faa8dd7900cb2e2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "49af17d9-3371-4957-b2b7-0a84d935a7c9",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "deer-agent <deer@noreply>",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 9,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    },
+    "68feaa05b660c1a7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "13034e64-46de-4c58-b888-69393d5ab54d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "deer-agent <deer@noreply>",
+      "messages": [],
+      "total_additions": 192,
+      "total_deletions": 130,
+      "accepted_lines": 178,
+      "overriden_lines": 0
+    },
+    "a2c1b1578778d493": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d8f26035-dda9-4554-bfa4-9df5cb6f0589",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "deer-agent <deer@noreply>",
+      "messages": [],
+      "total_additions": 2000,
+      "total_deletions": 953,
+      "accepted_lines": 1049,
+      "overriden_lines": 0
+    }
+  }
+}
