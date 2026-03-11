@@ -1,37 +1,34 @@
 # deer
 
-`deer` is what I consider the bare minimum tool for running multiple `claude` instances.
-If you want to parallelize `claude`, but don't like the complexity of agent orchestrators like `multiclaude` and `claude-squad`, `deer` may be for you.
+`deer` is what I consider the simplest tool for running multiple unattended `claude` instances safely.
+
+If you want to parallelize `claude` agents, but don't like the complexity of agent orchestrators like `multiclaude` and `claude-squad`, `deer` may be for you.
+
+![the deer dashboard TUI](assets/demo-dashboard.png)
+
+## Goals
+
+1. Quickly run and work with multiple `claude` instances at once.
+2. Enable running with `--dangerously-skip-permissions` safely.
+3. Use the users Claude Code subscription for everything.
+4. Feel like `claude`.
 
 ---
 
 ## How it works
 
-[High-level explanation: you give deer a prompt, it spins up a sandboxed Claude Code agent in a git worktree, the agent does the work, and deer opens a PR]
-
----
-
-## Requirements
-
-- [Bun](https://bun.sh) — runtime
-- [Claude Code](https://claude.ai/code) (`claude` CLI) — the agent
-- [GitHub CLI](https://cli.github.com) (`gh`) — authenticated (`gh auth login`)
-- [tmux](https://github.com/tmux/tmux) — session management
-- **macOS**: `sandbox-exec` (ships with macOS)
-- **Linux**: `bubblewrap` (`bwrap`) — for process sandboxing
+1. Launch `deer`.
+2. Send prompts (each prompt is a worktree and agent isolated from filesystem and network).
+3. Monitor agents and attach into them if necessary.
+4. Press `p` to open a PR when finished.
 
 ---
 
 ## Installation
 
 ```sh
-npx @zdavison/deer install
+bunx @zdavison/deer install
 ```
-
-Or install manually via npm/bun/pnpm.
-
-> The installer downloads a prebuilt binary for your platform to `~/.local/bin/deer`.
-> If that directory is not in your `PATH`, add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile.
 
 ### Supported platforms
 
@@ -53,6 +50,8 @@ deer uses your Claude credentials to power the agent. It checks for credentials 
 
 If you have Claude Code installed and logged in, deer will use your subscription automatically on macOS with no extra setup.
 
+Subscriptions are prioritized over API keys, so if you have both setup, `deer` will use your subscription.
+
 ---
 
 ## Usage
@@ -67,8 +66,6 @@ deer
 
 ### Dashboard
 
-[Description of the TUI dashboard — task list, log viewer, keyboard shortcuts]
-
 #### Keyboard shortcuts
 
 | Key | Action |
@@ -80,13 +77,11 @@ deer
 
 ### Attaching to a running agent
 
-Each task runs in a named tmux session. You can attach directly to watch the agent in real time:
+Each task runs in a named tmux session. You can attach directly to watch the agent in real time by pressing `Enter` while the agent is selected.
 
-```sh
-tmux attach -t <session-name>
-```
+While attached, a `tmux` status bar is displayed with basic instructions on how to detach (`Ctrl+b`, `d`).
 
-Press `Ctrl+b d` to detach without stopping the agent.
+![the deer tmux status bar](assets/deer-status-bar.png)
 
 ---
 
@@ -111,13 +106,15 @@ setup_command = ""         # command to run before the agent starts
 allowlist = [...]          # domains the sandbox can reach (replaces default list)
 
 [sandbox]
-runtime = "srt"
+runtime = "srt"            # ths is the only runtime for now
 env_passthrough = []       # host env vars to forward into the sandbox
 ```
 
 ### Repo-local config (`deer.toml`)
 
 Place this in your repo root — it is safe to commit.
+
+You only need this if the defaults are not sufficient for you.
 
 ```toml
 # Override the base branch for this repo
@@ -145,33 +142,29 @@ See `deer.toml.example` for a full annotated example.
 
 ## Security model
 
-deer runs each agent in an isolated sandbox using the [Anthropic Sandbox Runtime (SRT)](https://github.com/anthropic-ai/sandbox-runtime):
+`deer` runs each agent in an isolated sandbox using the [Anthropic Sandbox Runtime (SRT)](https://github.com/anthropic-ai/sandbox-runtime):
 
-- **Filesystem**: the agent can only write to its git worktree; the rest of the filesystem is read-only or inaccessible
-- **Network**: outbound traffic is filtered through a domain allowlist; only explicitly permitted domains are reachable
-- **Credentials**: API keys and OAuth tokens never enter the sandbox — a host-side MITM proxy intercepts requests to credentialed domains and injects auth headers transparently
-- **Environment**: only explicitly listed env vars are forwarded; host secrets are not leaked via the process environment
+- **Filesystem**: the agent can only write to its git worktree; the rest of the filesystem is read-only or inaccessible.
+- **Network**: outbound traffic is filtered through a domain allowlist; only explicitly permitted domains are reachable.
+- **Credentials**: API keys and OAuth tokens never enter the sandbox — a host-side MITM proxy intercepts requests to credentialed domains and injects auth headers transparently. By default this applies to `claude` keys/OAuth tokens only, but you can add additional ones if necessary.
+- **Environment**: only explicitly listed env vars are forwarded; host secrets are not leaked via the process environment.
 
 ---
 
 ## How PRs are created
 
-[Describe the flow: worktree creation, agent runs on a branch, deer finalizes by pushing the branch and opening a PR via `gh`]
+Press `p` on an idle task to create a pull request.
+
+This will generate a branch name, PR title, and PR description that describes the work done and push it to the repo.
+
+Your PR template (`.github/PULL_REQUEST_TEMPLATE.md`) is conformed to automatically.
 
 ---
 
 ## Contributing
 
-[TBD — how to build from source, run tests, submit PRs]
-
 ```sh
 bun install
 bun test
-bun run dev
+bun dev
 ```
-
----
-
-## License
-
-[TBD]

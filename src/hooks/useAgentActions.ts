@@ -177,7 +177,7 @@ export function useAgentActions({
 
   // ── Spawn agent ───────────────────────────────────────────────────
 
-  const spawnAgent = useCallback(async (prompt: string, baseBranch?: string, continueSession?: { taskId: string; worktreePath: string; branch: string }, createdAt?: string) => {
+  const spawnAgent = useCallback(async (prompt: string, baseBranch?: string, continueSession?: { taskId: string; worktreePath: string; branch: string; result?: { finalBranch: string; prUrl: string } | null }, createdAt?: string) => {
     if (!prompt.trim()) return;
     if (preflight && !preflight.ok) return;
 
@@ -198,6 +198,7 @@ export function useAgentActions({
       ...(continueSession && {
         worktreePath: continueSession.worktreePath,
         branch: continueSession.branch,
+        result: continueSession.result ?? null,
       }),
     });
 
@@ -259,8 +260,11 @@ export function useAgentActions({
 
       // Process exited — agent is now at rest, idle until deleted
       agent.idle = true;
-      agent.result = { finalBranch: handle.branch, prUrl: "" };
-      agent.lastActivity = "Idle \u2014 press p to create PR, \u23CE to attach";
+      const existingPrUrl = agent.result?.prUrl || "";
+      agent.result = { finalBranch: agent.result?.finalBranch || handle.branch, prUrl: existingPrUrl };
+      agent.lastActivity = existingPrUrl
+        ? "Idle \u2014 press u to update PR, \u23CE to attach"
+        : "Idle \u2014 press p to create PR, \u23CE to attach";
     } catch (err) {
       if (!abortController.signal.aborted) {
         agent.status = transition(agent.status, "ERROR") ?? "failed";
@@ -473,7 +477,10 @@ export function useAgentActions({
       runtimeRef.current.delete(agent.taskId);
     }
 
-    const { prompt, baseBranch, worktreePath, branch, taskId, createdAt } = agent;
+    const { prompt, baseBranch, worktreePath, branch, taskId, createdAt, result } = agent;
+    // Use the finalized branch name if the PR was already created (branch gets
+    // renamed from deer/<taskId> → deer/<branchName> during PR creation).
+    const effectiveBranch = result?.finalBranch || branch;
 
     if (worktreePath) {
       // Kill the tmux session but preserve the worktree for --continue
@@ -481,7 +488,7 @@ export function useAgentActions({
         stdout: "pipe", stderr: "pipe",
       }).exited.catch(() => {});
       setAgents((prev) => prev.filter((a) => a !== agent));
-      spawnAgent(prompt, baseBranch, { taskId, worktreePath, branch }, createdAt);
+      spawnAgent(prompt, baseBranch, { taskId, worktreePath, branch: effectiveBranch, result }, createdAt);
     } else {
       deleteAgent(agent);
       spawnAgent(prompt, baseBranch, undefined, createdAt);
