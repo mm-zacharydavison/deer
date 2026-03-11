@@ -10,7 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
 
-const REPO = "mm-zacharydavison/deer";
+const REPO = "zdavison/deer";
 const VERSION = pkg.version;
 
 const PLATFORM_MAP = {
