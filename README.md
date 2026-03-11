@@ -1,8 +1,7 @@
 # deer
 
-> Unattended coding agent.
-
-[Short description — what deer is and what problem it solves]
+`deer` is what I consider the bare minimum tool for running multiple `claude` instances.
+If you want to parallelize `claude`, but don't like the complexity of agent orchestrators like `multiclaude` and `claude-squad`, `deer` may be for you.
 
 ---
 
@@ -26,7 +25,7 @@
 ## Installation
 
 ```sh
-npx @zdavison/deer
+npx @zdavison/deer install
 ```
 
 Or install manually via npm/bun/pnpm.

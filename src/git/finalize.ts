@@ -126,6 +126,10 @@ async function generatePRMetadata(worktreePath: string, baseBranch: string, prom
   const logResult = await Bun.$`git -C ${worktreePath} log --oneline ${mergeBase}..HEAD`.quiet().nothrow();
   const commitLog = logResult.stdout.toString().trim();
 
+  // Get the list of actually changed files for the prompt
+  const filesResult = await Bun.$`git -C ${worktreePath} diff --name-only ${mergeBase}..HEAD`.quiet().nothrow();
+  const changedFiles = filesResult.stdout.toString().trim();
+
   const truncatedDiff = diff.length > MAX_DIFF_FOR_PR_METADATA
     ? diff.slice(0, MAX_DIFF_FOR_PR_METADATA) + "\n... (diff truncated)"
     : diff;
@@ -146,12 +150,16 @@ Rules:
 - branchName: short, descriptive, kebab-case (e.g. "fix-login-redirect", "add-user-search"). Do NOT include any prefix like "deer/" — just the name itself.
 - title: concise, imperative mood (e.g. "Fix login redirect loop", "Add user search endpoint")
 - ${bodyInstruction}
+- CRITICAL: The Changes section MUST only reference files that actually appear in the diff below. Do NOT infer or guess file changes based on the task prompt. The changed files are EXACTLY: ${changedFiles || "(none)"}
 ${templateSection}
 Task prompt:
 ${prompt}
 
 Commits:
 ${commitLog}
+
+Changed files:
+${changedFiles}
 
 Diff:
 ${truncatedDiff}`;
