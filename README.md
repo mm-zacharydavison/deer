@@ -76,7 +76,6 @@ The TUI dashboard shows all running and completed agents, their status, recent l
 | Key | Action |
 |-----|--------|
 | `Enter` | Submit prompt and launch agent |
-| `Shift+Enter` | Insert newline in prompt |
 | `↑` / `↓` | Navigate prompt history |
 | `Tab` | Switch focus to agent list |
 
