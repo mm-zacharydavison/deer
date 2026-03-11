@@ -52,6 +52,10 @@ export interface PersistedTask extends TaskMetadata {
   createdAt: string;
   /** ISO 8601 timestamp — null while task is still running */
   completedAt: string | null;
+  /** Git branch to base the worktree on (e.g. "main") */
+  baseBranch: string;
+  /** Path to the git worktree on disk */
+  worktreePath: string;
 }
 
 /**

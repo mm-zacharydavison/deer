@@ -35,6 +35,7 @@ function makeStateFile(overrides?: Partial<TaskStateFile>): TaskStateFile {
     createdAt: new Date().toISOString(),
     ownerPid: process.pid,
     worktreePath: "/home/user/.local/share/deer/tasks/deer_test01/worktree",
+    baseBranch: "main",
     ...overrides,
   };
 }

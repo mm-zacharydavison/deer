@@ -101,6 +101,8 @@ describe("history persistence", () => {
       finalBranch: null,
       error: null,
       lastActivity: "PR ready",
+      baseBranch: "main",
+      worktreePath: "",
       ...overrides,
     };
   }

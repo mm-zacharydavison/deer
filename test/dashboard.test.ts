@@ -17,6 +17,8 @@ function makeTask(overrides?: Partial<PersistedTask>): PersistedTask {
     finalBranch: null,
     error: null,
     lastActivity: "done",
+    baseBranch: "main",
+    worktreePath: "",
     ...overrides,
   };
 }
@@ -82,17 +84,36 @@ describe("historicalAgent", () => {
     expect(agent.historical).toBe(true);
   });
 
-  test("populates result from prUrl", () => {
+  test("populates result with both prUrl and finalBranch", () => {
     const task = makeTask({ prUrl: "https://github.com/org/repo/pull/1", finalBranch: "deer/my-task" });
     const agent = historicalAgent(task);
     expect(agent.result?.prUrl).toBe("https://github.com/org/repo/pull/1");
     expect(agent.result?.finalBranch).toBe("deer/my-task");
   });
 
-  test("has no worktreePath (historical tasks are not live)", () => {
-    const task = makeTask();
+  test("has no worktreePath when not provided in history", () => {
+    const task = makeTask({ worktreePath: "" });
     const agent = historicalAgent(task);
     expect(agent.worktreePath).toBe("");
+  });
+
+  test("restores worktreePath from persisted task", () => {
+    const task = makeTask({ worktreePath: "/home/user/.local/share/deer/tasks/deer_xxx/worktree" });
+    const agent = historicalAgent(task);
+    expect(agent.worktreePath).toBe("/home/user/.local/share/deer/tasks/deer_xxx/worktree");
+  });
+
+  test("restores baseBranch from persisted task", () => {
+    const task = makeTask({ baseBranch: "develop" });
+    const agent = historicalAgent(task);
+    expect(agent.baseBranch).toBe("develop");
+  });
+
+  test("populates result from finalBranch even without prUrl", () => {
+    const task = makeTask({ finalBranch: "deer/my-task", prUrl: null });
+    const agent = historicalAgent(task);
+    expect(agent.result?.finalBranch).toBe("deer/my-task");
+    expect(agent.result?.prUrl).toBe("");
   });
 
   test("preserves createdAt from task", () => {
@@ -118,6 +139,7 @@ function makeStateFile(overrides?: Partial<TaskStateFile>): TaskStateFile {
     createdAt: new Date().toISOString(),
     ownerPid: process.pid,
     worktreePath: "/home/user/.local/share/deer/tasks/deer_xxx/worktree",
+    baseBranch: "main",
     ...overrides,
   };
 }
@@ -175,12 +197,23 @@ describe("liveTaskFromStateFile", () => {
     expect(agent.logs).toEqual(logs);
   });
 
-  test("populates result from prUrl in state file", () => {
+  test("populates result from prUrl and finalBranch in state file", () => {
     const agent = liveTaskFromStateFile(
       makeStateFile({ prUrl: "https://github.com/org/repo/pull/42", finalBranch: "deer/task" }),
     );
     expect(agent.result?.prUrl).toBe("https://github.com/org/repo/pull/42");
     expect(agent.result?.finalBranch).toBe("deer/task");
+  });
+
+  test("populates result from finalBranch even without prUrl", () => {
+    const agent = liveTaskFromStateFile(makeStateFile({ finalBranch: "deer/task", prUrl: null }));
+    expect(agent.result?.finalBranch).toBe("deer/task");
+    expect(agent.result?.prUrl).toBe("");
+  });
+
+  test("uses actual status from state file", () => {
+    const agent = liveTaskFromStateFile(makeStateFile({ status: "failed" }));
+    expect(agent.status).toBe("failed");
   });
 });
 
@@ -201,9 +234,35 @@ describe("historicalAgentFromStateFile", () => {
     expect(agent.worktreePath).toBe(worktreePath);
   });
 
-  test("shows interrupted lastActivity", () => {
-    const agent = historicalAgentFromStateFile(makeStateFile({ lastActivity: "Working..." }));
+  test("shows interrupted lastActivity when not idle", () => {
+    const agent = historicalAgentFromStateFile(makeStateFile({ idle: false, lastActivity: "Working..." }));
     expect(agent.lastActivity).toBe("Interrupted — deer was closed");
+  });
+
+  test("preserves lastActivity when idle (Claude had finished)", () => {
+    const agent = historicalAgentFromStateFile(makeStateFile({ idle: true, lastActivity: "Idle — press ⏎ to attach" }));
+    expect(agent.lastActivity).toBe("Idle — press ⏎ to attach");
+  });
+
+  test("restores idle flag from state file", () => {
+    const agent = historicalAgentFromStateFile(makeStateFile({ idle: true }));
+    expect(agent.idle).toBe(true);
+  });
+
+  test("idle defaults to false when not set", () => {
+    const agent = historicalAgentFromStateFile(makeStateFile({ idle: false }));
+    expect(agent.idle).toBe(false);
+  });
+
+  test("restores baseBranch from state file", () => {
+    const agent = historicalAgentFromStateFile(makeStateFile({ baseBranch: "develop" } as any));
+    expect(agent.baseBranch).toBe("develop");
+  });
+
+  test("populates result from finalBranch even without prUrl", () => {
+    const agent = historicalAgentFromStateFile(makeStateFile({ finalBranch: "deer/fix-bug", prUrl: null }));
+    expect(agent.result?.finalBranch).toBe("deer/fix-bug");
+    expect(agent.result?.prUrl).toBe("");
   });
 
   test("carries over logs from state file", () => {

@@ -41,7 +41,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
   const [animTick, setAnimTick] = useState(0);
   const configRef = useRef<DeerConfig | null>(null);
 
-  const { agents, setAgents, agentsRef, deletedTaskIdsRef, baseBranchRef, restoredProxiesRef, syncWithHistory } = useAgentSync(cwd, configRef);
+  const { agents, setAgents, agentsRef, deletedTaskIdsRef, baseBranchRef, restoredProxiesRef, liveSessionIdsRef, syncWithHistory } = useAgentSync(cwd, configRef);
 
   const {
     promptHistory,
@@ -56,7 +56,7 @@ export default function Dashboard({ cwd }: { cwd: string }) {
 
   usePrPoller(agentsRef, setAgents);
 
-  const { spawnAgent, killAgent, abortAllAgents, attachToAgent, openShell, createPr, updatePr, deleteAgent, retryAgent } = useAgentActions({
+  const { spawnAgent, killAgent, abortAllAgents, attachToAgent, openShell, createPr, updatePr, deleteAgent, retryAgent, resumeLiveSession } = useAgentActions({
     cwd,
     setAgents,
     deletedTaskIdsRef,
@@ -132,6 +132,18 @@ export default function Dashboard({ cwd }: { cwd: string }) {
       process.removeListener("exit", cleanup);
     };
   }, [cwd]);
+
+  // ── Resume sessions whose tmux pane survived a deer restart ──────
+
+  useEffect(() => {
+    if (liveSessionIdsRef.current.size === 0) return;
+    for (const agent of agents) {
+      if (liveSessionIdsRef.current.has(agent.taskId)) {
+        liveSessionIdsRef.current.delete(agent.taskId);
+        resumeLiveSession(agent);
+      }
+    }
+  }, [agents]);
 
   // ── Animate upload icon when creating PR ─────────────────────────
 

@@ -40,6 +40,7 @@ function toTaskStateFile(agent: AgentState): TaskStateFile {
   return {
     taskId: agent.taskId,
     prompt: agent.prompt,
+    baseBranch: agent.baseBranch,
     status: agent.status as TaskStateFile["status"],
     elapsed: agent.elapsed,
     lastActivity: agent.lastActivity,
@@ -69,6 +70,8 @@ async function saveToHistory(agent: AgentState, repoPath: string): Promise<void>
   const task: PersistedTask = {
     taskId: agent.taskId,
     prompt: agent.prompt,
+    baseBranch: agent.baseBranch,
+    worktreePath: agent.worktreePath,
     status: agent.status as PersistedTask["status"],
     createdAt: agent.createdAt,
     completedAt: new Date().toISOString(),
@@ -501,5 +504,74 @@ export function useAgentActions({
     }
   }, [spawnAgent, deleteAgent, setAgents]);
 
-  return { spawnAgent, killAgent, abortAllAgents, attachToAgent, openShell, createPr, updatePr, deleteAgent, retryAgent };
+  // ── Resume live session (tmux still running after deer restart) ──────
+
+  /**
+   * Re-attach a poll loop to a tmux session that survived a deer restart.
+   * Called when syncWithHistory detects a dead-owner task whose tmux session
+   * is still alive. Takes ownership of the session without re-creating the
+   * sandbox or worktree.
+   */
+  const resumeLiveSession = useCallback(async (agent: AgentState) => {
+    // Immediately take ownership so subsequent syncs skip this agent
+    if (runtimeRef.current.has(agent.taskId)) return;
+    agent.historical = false;
+
+    const sessionName = `deer-${agent.taskId}`;
+    const dead = await isTmuxSessionDead(sessionName);
+    if (dead) {
+      // Session ended between the sync check and now — revert to interrupted
+      agent.historical = true;
+      agent.status = "interrupted";
+      agent.idle = false;
+      agent.lastActivity = "Interrupted — deer was closed";
+      setAgents((prev) => [...prev]);
+      return;
+    }
+
+    agent.status = "running";
+    const abortController = new AbortController();
+    let ticks = 0;
+    const timer = setInterval(() => {
+      if (!agent.idle) agent.elapsed++;
+      ticks++;
+      if (ticks % 10 === 0) persistState(agent);
+      setAgents((prev) => [...prev]);
+    }, 1000);
+
+    runtimeRef.current.set(agent.taskId, { abortController, timer });
+    await persistStateAsync(agent); // Claim ownership: update ownerPid
+    appendLog(agent, "[deer] Resuming session after restart...");
+    setAgents((prev) => [...prev]);
+
+    try {
+      await runAgentPoll(agent, sessionName, abortController.signal);
+
+      if (abortController.signal.aborted) return;
+
+      agent.idle = true;
+      agent.result = { finalBranch: agent.branch, prUrl: agent.result?.prUrl ?? "" };
+      agent.lastActivity = "Idle \u2014 press p to create PR, \u23CE to attach";
+    } catch (err) {
+      if (!abortController.signal.aborted) {
+        agent.status = transition(agent.status, "ERROR") ?? "failed";
+        agent.error = err instanceof Error ? err.message : String(err);
+        agent.lastActivity = truncate(agent.error, 120);
+      }
+    } finally {
+      const runtime = runtimeRef.current.get(agent.taskId);
+      if (runtime) {
+        clearInterval(runtime.timer);
+        runtimeRef.current.delete(agent.taskId);
+      }
+      paneStateRef.current.delete(agent.taskId);
+      if (!agent.deleted) {
+        await saveToHistory(agent, cwd);
+      }
+      await removeTaskState(agent.taskId).catch(() => {});
+      setAgents((prev) => [...prev]);
+    }
+  }, [cwd]);
+
+  return { spawnAgent, killAgent, abortAllAgents, attachToAgent, openShell, createPr, updatePr, deleteAgent, retryAgent, resumeLiveSession };
 }

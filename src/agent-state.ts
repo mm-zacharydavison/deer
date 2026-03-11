@@ -86,13 +86,17 @@ export function historicalAgent(task: PersistedTask): AgentState {
   return createAgentState({
     taskId: task.taskId,
     prompt: task.prompt,
+    baseBranch: task.baseBranch || "main",
     status: wasInterrupted ? "interrupted" : (task.status as AgentStatus),
     elapsed: task.elapsed,
     lastActivity: wasInterrupted ? "Interrupted — deer was closed" : task.lastActivity,
-    result: task.prUrl ? { finalBranch: task.finalBranch ?? "", prUrl: task.prUrl } : null,
+    result: task.finalBranch
+      ? { finalBranch: task.finalBranch, prUrl: task.prUrl ?? "" }
+      : null,
     error: task.error || "",
     historical: true,
     createdAt: task.createdAt,
+    worktreePath: task.worktreePath || "",
     branch: task.finalBranch ?? `deer/${task.taskId}`,
   });
 }
@@ -106,14 +110,15 @@ export function liveTaskFromStateFile(stateFile: TaskStateFile): AgentState {
   return createAgentState({
     taskId: stateFile.taskId,
     prompt: stateFile.prompt,
-    status: "running",
+    baseBranch: stateFile.baseBranch || "main",
+    status: (stateFile.status as AgentStatus) || "running",
     elapsed: stateFile.elapsed,
     lastActivity: stateFile.lastActivity,
     logs: [...stateFile.logs],
     idle: stateFile.idle,
     historical: true,
-    result: stateFile.prUrl
-      ? { finalBranch: stateFile.finalBranch ?? "", prUrl: stateFile.prUrl }
+    result: stateFile.finalBranch
+      ? { finalBranch: stateFile.finalBranch, prUrl: stateFile.prUrl ?? "" }
       : null,
     createdAt: stateFile.createdAt,
     worktreePath: stateFile.worktreePath,
@@ -124,17 +129,24 @@ export function liveTaskFromStateFile(stateFile: TaskStateFile): AgentState {
 /**
  * Build an AgentState from a state file whose owning process has died.
  * Shows the task as interrupted with its last known state.
+ * If the task was idle (Claude had finished), the idle flag is preserved so
+ * actions like "create PR" remain available on restart.
  */
 export function historicalAgentFromStateFile(stateFile: TaskStateFile): AgentState {
   return createAgentState({
     taskId: stateFile.taskId,
     prompt: stateFile.prompt,
+    baseBranch: stateFile.baseBranch || "main",
     status: "interrupted",
     elapsed: stateFile.elapsed,
-    lastActivity: "Interrupted — deer was closed",
+    // If the agent was idle (Claude finished) before deer was closed, preserve
+    // the last activity so the user can see what it was doing. Otherwise, show
+    // the generic "deer was closed" message.
+    lastActivity: stateFile.idle ? stateFile.lastActivity : "Interrupted — deer was closed",
+    idle: stateFile.idle,
     logs: [...stateFile.logs],
-    result: stateFile.prUrl
-      ? { finalBranch: stateFile.finalBranch ?? "", prUrl: stateFile.prUrl }
+    result: stateFile.finalBranch
+      ? { finalBranch: stateFile.finalBranch, prUrl: stateFile.prUrl ?? "" }
       : null,
     error: stateFile.error || "",
     historical: true,

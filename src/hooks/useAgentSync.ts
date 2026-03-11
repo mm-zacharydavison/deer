@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import type { MutableRefObject } from "react";
 import { loadHistory, dataDir } from "../task";
 import type { SandboxCleanup } from "../sandbox/index";
+import { isTmuxSessionDead } from "../sandbox/index";
 import { resolveRuntime } from "../sandbox/resolve";
 import { detectRepo } from "../git/worktree";
 import { type AgentState, historicalAgent, liveTaskFromStateFile, historicalAgentFromStateFile } from "../agent-state";
@@ -19,6 +20,11 @@ export function useAgentSync(cwd: string, configRef: MutableRefObject<DeerConfig
   const baseBranchRef = useRef("main");
   /** Proxy cleanup functions for cross-instance tasks restored after a restart */
   const restoredProxiesRef = useRef(new Map<string, SandboxCleanup>());
+  /**
+   * Task IDs that have live tmux sessions after a deer restart. The dashboard
+   * watches this ref and calls resumeLiveSession for each entry.
+   */
+  const liveSessionIdsRef = useRef(new Set<string>());
 
   // ── Detect base branch on mount ────────────────────────────────────
 
@@ -87,12 +93,24 @@ export function useAgentSync(cwd: string, configRef: MutableRefObject<DeerConfig
           continue;
         }
 
-        // Owner process died — clean up any restored proxy and show as interrupted
+        // Owner process died — clean up any restored proxy
         const proxyCleanup = restoredProxiesRef.current.get(taskId);
         if (proxyCleanup) {
           proxyCleanup();
           restoredProxiesRef.current.delete(taskId);
         }
+
+        // Check whether the tmux session is still alive. If so, Claude is
+        // still running and we should resume polling instead of showing as
+        // interrupted. Add to liveSessionIdsRef for the dashboard to pick up.
+        const sessionDead = await isTmuxSessionDead(`deer-${taskId}`);
+        if (!sessionDead && !liveSessionIdsRef.current.has(taskId)) {
+          liveSessionIdsRef.current.add(taskId);
+          // Show as running with last known state while we hand off to the poll loop
+          newAgents.push(liveTaskFromStateFile(stateFile));
+          continue;
+        }
+
         newAgents.push(historicalAgentFromStateFile(stateFile));
         continue;
       }
@@ -166,5 +184,5 @@ export function useAgentSync(cwd: string, configRef: MutableRefObject<DeerConfig
     };
   }, [syncWithHistory]);
 
-  return { agents, setAgents, agentsRef, deletedTaskIdsRef, baseBranchRef, restoredProxiesRef, syncWithHistory };
+  return { agents, setAgents, agentsRef, deletedTaskIdsRef, baseBranchRef, restoredProxiesRef, liveSessionIdsRef, syncWithHistory };
 }

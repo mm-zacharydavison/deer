@@ -23,6 +23,8 @@ export interface TaskStateFile extends TaskMetadata {
   ownerPid: number;
   /** Path to the git worktree for this task */
   worktreePath: string;
+  /** Git branch to base the worktree on (e.g. "main") */
+  baseBranch: string;
 }
 
 // ── Paths ─────────────────────────────────────────────────────────────
