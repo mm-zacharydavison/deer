@@ -165,7 +165,7 @@ export function useAgentActions({
 
   // ── Spawn agent ───────────────────────────────────────────────────
 
-  const spawnAgent = useCallback(async (prompt: string, baseBranch?: string, continueSession?: { taskId: string; worktreePath: string; branch: string }) => {
+  const spawnAgent = useCallback(async (prompt: string, baseBranch?: string, continueSession?: { taskId?: string; worktreePath?: string; branch?: string; createdAt?: string }) => {
     if (!prompt.trim()) return;
     if (preflight && !preflight.ok) return;
 
@@ -182,11 +182,9 @@ export function useAgentActions({
       taskId,
       prompt: prompt.trim(),
       baseBranch: effectiveBranch,
-      createdAt: new Date().toISOString(),
-      ...(continueSession && {
-        worktreePath: continueSession.worktreePath,
-        branch: continueSession.branch,
-      }),
+      createdAt: continueSession?.createdAt ?? new Date().toISOString(),
+      ...(continueSession?.worktreePath != null && { worktreePath: continueSession.worktreePath }),
+      ...(continueSession?.branch != null && { branch: continueSession.branch }),
     });
 
     const abortController = new AbortController();
@@ -466,10 +464,10 @@ export function useAgentActions({
         stdout: "pipe", stderr: "pipe",
       }).exited.catch(() => {});
       setAgents((prev) => prev.filter((a) => a !== agent));
-      spawnAgent(prompt, baseBranch, { taskId, worktreePath, branch });
+      spawnAgent(prompt, baseBranch, { taskId, worktreePath, branch, createdAt: agent.createdAt });
     } else {
       deleteAgent(agent);
-      spawnAgent(prompt, baseBranch);
+      spawnAgent(prompt, baseBranch, { createdAt: agent.createdAt });
     }
   }, [spawnAgent, deleteAgent, setAgents]);
 
