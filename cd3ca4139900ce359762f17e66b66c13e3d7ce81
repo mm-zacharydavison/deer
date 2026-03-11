@@ -1,0 +1,25 @@
+src/git/finalize.ts
+  ff90a0a3992fc8d2 142-143,225
+scripts/install.js
+  ff90a0a3992fc8d2 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "cd3ca4139900ce359762f17e66b66c13e3d7ce81",
+  "prompts": {
+    "ff90a0a3992fc8d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e75daffe-df54-497f-a2e3-d620258eff9e",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "deer-agent <deer@noreply>",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 4,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
