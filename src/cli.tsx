@@ -45,9 +45,7 @@ async function main() {
     // Enter alternate screen buffer
     process.stdout.write("\x1b[?1049h");
 
-    const instance = render(<DemoDashboard />, {
-      kittyKeyboard: { flags: ["disambiguateEscapeCodes", "reportEventTypes"] },
-    });
+    const instance = render(<DemoDashboard />);
 
     await instance.waitUntilExit();
 
@@ -72,9 +70,7 @@ async function main() {
   // Enter alternate screen buffer
   process.stdout.write("\x1b[?1049h");
 
-  const instance = render(<Dashboard cwd={repoRoot} />, {
-    kittyKeyboard: { flags: ["disambiguateEscapeCodes", "reportEventTypes"] },
-  });
+  const instance = render(<Dashboard cwd={repoRoot} />);
 
   await instance.waitUntilExit();
 

@@ -58,13 +58,8 @@ export function PromptInput({
     };
   }, [isDisabled]);
 
-  // Ink v6 Kitty keyboard protocol is opt-in via render()'s kittyKeyboard
-  // option (set in cli.tsx). When active, \x1b[13;2u is parsed into
-  // key.return + key.shift, which we handle below.
-
   useInput(
     (input, key) => {
-      if (key.eventType === "release") return;
       if (terminalSuspended) return;
 
       if (
