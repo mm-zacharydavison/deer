@@ -60,7 +60,6 @@ export function useKeyboardInput({
 }: KeyboardInputDeps) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [inputFocused, setInputFocused] = useState(true);
-  const [confirmQuit, setConfirmQuit] = useState(false);
   const [pendingConfirmation, setPendingConfirmation] = useState<{
     action: AgentAction;
     agent: AgentState;
@@ -124,12 +123,6 @@ export function useKeyboardInput({
 
   function handleQuitInput(input: string): boolean {
     if (input === "q" && !inputFocused) {
-      const running = agents.filter(isActive);
-      if (running.length > 0 && !confirmQuit) {
-        setConfirmQuit(true);
-        return true;
-      }
-      for (const a of running) killAgent(a);
       exit();
       return true;
     }
@@ -137,17 +130,6 @@ export function useKeyboardInput({
   }
 
   function handleConfirmationInput(input: string): boolean {
-    if (confirmQuit) {
-      if (input === "y" || input === "Y") {
-        const running = agents.filter(isActive);
-        for (const a of running) killAgent(a);
-        exit();
-      } else {
-        setConfirmQuit(false);
-      }
-      return true;
-    }
-
     if (pendingConfirmation) {
       if (input === "y" || input === "Y") {
         executeAction(pendingConfirmation.action, pendingConfirmation.agent);
@@ -288,7 +270,6 @@ export function useKeyboardInput({
     selectedIdx,
     inputFocused,
     setInputFocused,
-    confirmQuit,
     pendingConfirmation,
     verboseMode,
     searchMode,

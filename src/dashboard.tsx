@@ -74,7 +74,6 @@ export default function Dashboard({ cwd, mockAgents }: { cwd: string; mockAgents
   const {
     selectedIdx,
     inputFocused,
-    confirmQuit,
     pendingConfirmation,
     verboseMode,
     searchMode,
@@ -195,14 +194,6 @@ export default function Dashboard({ cwd, mockAgents }: { cwd: string; mockAgents
           <Text color="yellow" bold>{pendingConfirmation.message}</Text>
         </Box>
       )}
-      {confirmQuit && (
-        <Box paddingX={1}>
-          <Text color="yellow" bold>
-            {t("quit_confirm", { n: activeCount, s: activeCount !== 1 ? "s" : "" })}
-          </Text>
-        </Box>
-      )}
-
       {/* Preflight errors */}
       {preflight && !preflight.ok && (
         <Box flexDirection="column" paddingX={1}>
