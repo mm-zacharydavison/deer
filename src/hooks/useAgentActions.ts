@@ -154,7 +154,7 @@ export function useAgentActions({
           const activity = truncate(lastOutput, 120);
           if (activity !== agent.lastActivity) {
             agent.lastActivity = activity;
-            appendLog(agent, `[tmux] ${truncate(lastOutput, 200)}`);
+            appendLog(agent, `[tmux] ${lastOutput}`);
             await persistStateAsync(agent);
             setAgents((prev) => [...prev]);
           }
