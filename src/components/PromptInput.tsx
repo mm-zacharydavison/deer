@@ -2,6 +2,19 @@ import { Text } from "ink";
 import React, { useState, useRef, useMemo } from "react";
 import { useInput } from "ink";
 
+/** Number of newlines required for pasted text to be shown collapsed. */
+const PASTE_LINE_THRESHOLD = 5;
+
+type PasteBlock = { start: number; end: number; id: number };
+
+function shiftBlocks(blocks: PasteBlock[], afterPos: number, delta: number): PasteBlock[] {
+  return blocks.map((b) => {
+    if (b.start >= afterPos) return { ...b, start: b.start + delta, end: b.end + delta };
+    if (b.end > afterPos) return { ...b, end: b.end + delta };
+    return b;
+  });
+}
+
 /** Text input that supports Shift+Enter or /↵ to insert newlines and Enter to submit. */
 export function PromptInput({
   defaultValue = "",
@@ -16,12 +29,16 @@ export function PromptInput({
 }) {
   const [value, setValue] = useState(defaultValue);
   const [cursorOffset, setCursorOffset] = useState(defaultValue.length);
+  const [pasteBlocks, setPasteBlocks] = useState<PasteBlock[]>([]);
 
   // Refs kept in sync with state for use in event handlers to avoid stale closures.
   const valueRef = useRef(value);
   const cursorOffsetRef = useRef(cursorOffset);
+  const pasteBlocksRef = useRef<PasteBlock[]>(pasteBlocks);
+  const pasteCountRef = useRef(0);
   valueRef.current = value;
   cursorOffsetRef.current = cursorOffset;
+  pasteBlocksRef.current = pasteBlocks;
 
   // Ink v6 Kitty keyboard protocol is opt-in via render()'s kittyKeyboard
   // option (set in cli.tsx). When active, \x1b[13;2u is parsed into
@@ -45,10 +62,13 @@ export function PromptInput({
           const val = valueRef.current;
           const newValue = val.slice(0, cur) + "\n" + val.slice(cur);
           const newCursor = cur + 1;
+          const newBlocks = shiftBlocks(pasteBlocksRef.current, cur, 1);
           valueRef.current = newValue;
           cursorOffsetRef.current = newCursor;
+          pasteBlocksRef.current = newBlocks;
           setValue(newValue);
           setCursorOffset(newCursor);
+          setPasteBlocks(newBlocks);
         } else {
           // If the character immediately before the cursor is '/', replace it
           // with a newline instead of submitting (like Claude Code's \ continuation).
@@ -56,6 +76,7 @@ export function PromptInput({
           const val = valueRef.current;
           if (cur > 0 && val[cur - 1] === "/") {
             const newValue = val.slice(0, cur - 1) + "\n" + val.slice(cur);
+            // Same length replacement — paste block offsets unchanged.
             valueRef.current = newValue;
             cursorOffsetRef.current = cur;
             setValue(newValue);
@@ -79,12 +100,34 @@ export function PromptInput({
         const cur = cursorOffsetRef.current;
         if (cur > 0) {
           const val = valueRef.current;
-          const newValue = val.slice(0, cur - 1) + val.slice(cur);
-          const newCursor = cur - 1;
-          valueRef.current = newValue;
-          cursorOffsetRef.current = newCursor;
-          setValue(newValue);
-          setCursorOffset(newCursor);
+          const blocks = pasteBlocksRef.current;
+          // If the cursor is inside (or at the end of) a paste block, delete the whole block.
+          const blockIdx = blocks.findIndex((b) => b.start < cur && cur <= b.end);
+          if (blockIdx >= 0) {
+            const block = blocks[blockIdx];
+            const blockLen = block.end - block.start;
+            const newValue = val.slice(0, block.start) + val.slice(block.end);
+            const newCursor = block.start;
+            const newBlocks = blocks
+              .filter((_, i) => i !== blockIdx)
+              .map((b) => (b.start >= block.end ? { ...b, start: b.start - blockLen, end: b.end - blockLen } : b));
+            valueRef.current = newValue;
+            cursorOffsetRef.current = newCursor;
+            pasteBlocksRef.current = newBlocks;
+            setValue(newValue);
+            setCursorOffset(newCursor);
+            setPasteBlocks(newBlocks);
+          } else {
+            const newValue = val.slice(0, cur - 1) + val.slice(cur);
+            const newCursor = cur - 1;
+            const newBlocks = shiftBlocks(blocks, cur - 1, -1);
+            valueRef.current = newValue;
+            cursorOffsetRef.current = newCursor;
+            pasteBlocksRef.current = newBlocks;
+            setValue(newValue);
+            setCursorOffset(newCursor);
+            setPasteBlocks(newBlocks);
+          }
         }
       } else if (input) {
         // Strip Kitty keyboard protocol responses (e.g. \x1b[?0u) that the
@@ -98,10 +141,25 @@ export function PromptInput({
         const val = valueRef.current;
         const newValue = val.slice(0, cur) + cleaned + val.slice(cur);
         const newCursor = cur + cleaned.length;
+
+        // Shift existing blocks that start at or after the insertion point.
+        const shiftedBlocks = shiftBlocks(pasteBlocksRef.current, cur, cleaned.length);
+
+        const lineCount = (cleaned.match(/\n/g) ?? []).length;
+        let newBlocks: PasteBlock[];
+        if (lineCount >= PASTE_LINE_THRESHOLD) {
+          const pasteId = ++pasteCountRef.current;
+          newBlocks = [...shiftedBlocks, { start: cur, end: cur + cleaned.length, id: pasteId }];
+        } else {
+          newBlocks = shiftedBlocks;
+        }
+
         valueRef.current = newValue;
         cursorOffsetRef.current = newCursor;
+        pasteBlocksRef.current = newBlocks;
         setValue(newValue);
         setCursorOffset(newCursor);
+        setPasteBlocks(newBlocks);
       }
     },
     { isActive: !isDisabled },
@@ -120,22 +178,47 @@ export function PromptInput({
         <Text key="rest" dimColor>{placeholder.slice(1)}</Text>,
       ];
     }
+
     const result: React.ReactNode[] = [];
+    const sortedBlocks = [...pasteBlocks].sort((a, b) => a.start - b.start);
+    let blockIdx = 0;
     let i = 0;
-    for (const char of value) {
-      const displayChar = char === "\n" ? "↵" : char;
-      if (i === cursorOffset) {
-        result.push(<Text key={i} inverse>{displayChar}</Text>);
-      } else {
-        result.push(displayChar);
+
+    while (i <= value.length) {
+      if (i === value.length) {
+        if (cursorOffset === value.length) {
+          result.push(<Text key="end-cursor" inverse> </Text>);
+        }
+        break;
       }
-      i++;
+
+      const currentBlock = sortedBlocks[blockIdx];
+      if (currentBlock && i === currentBlock.start) {
+        const blockText = value.slice(currentBlock.start, currentBlock.end);
+        const lines = blockText.split("\n").length;
+        const label = `[Pasted text #${currentBlock.id} +${lines} lines]`;
+        const cursorOnBlock = cursorOffset >= currentBlock.start && cursorOffset < currentBlock.end;
+        result.push(
+          cursorOnBlock
+            ? <Text key={`paste-${currentBlock.id}`} inverse>{label}</Text>
+            : <Text key={`paste-${currentBlock.id}`}>{label}</Text>,
+        );
+        i = currentBlock.end;
+        blockIdx++;
+      } else {
+        const char = value[i];
+        const displayChar = char === "\n" ? "↵" : char;
+        if (i === cursorOffset) {
+          result.push(<Text key={i} inverse>{displayChar}</Text>);
+        } else {
+          result.push(displayChar);
+        }
+        i++;
+      }
     }
-    if (cursorOffset === value.length) {
-      result.push(<Text key="end-cursor" inverse> </Text>);
-    }
+
     return result;
-  }, [value, cursorOffset, placeholder, isDisabled]);
+  }, [value, cursorOffset, pasteBlocks, placeholder, isDisabled]);
 
   return <Text>{parts}</Text>;
 }
