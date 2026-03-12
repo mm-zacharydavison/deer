@@ -66,10 +66,21 @@ export function PromptInput({
       if (
         key.upArrow ||
         key.downArrow ||
-        (key.ctrl && input === "c") ||
         key.tab ||
         (key.shift && key.tab)
       ) {
+        return;
+      }
+
+      if (key.ctrl && input === "c") {
+        if (valueRef.current.length > 0) {
+          valueRef.current = "";
+          cursorOffsetRef.current = 0;
+          pasteBlocksRef.current = [];
+          setValue("");
+          setCursorOffset(0);
+          setPasteBlocks([]);
+        }
         return;
       }
 
