@@ -42,15 +42,37 @@ export function ShortcutsBar({
 
   // Calculate character offset of "l logs" on line 1 so sub-actions align beneath it.
   // Layout: paddingX(1) + items joined by gap(2). Each item = "key label".
-  // Note: CJK characters are 2 columns wide but counted as 1 here — alignment
-  // will be approximate in Japanese (a full CJK-aware layout pass isn't warranted yet).
   const gap = 2;
   const fixedItems = [
     `Tab ${t("shortcuts_focus")}`,
     `j/k ${t("shortcuts_nav")}`,
     `/ ${t("shortcuts_search")}`,
   ];
-  const itemWidth = (s: string) => s.length;
+  // CJK and other double-width characters occupy 2 terminal columns.
+  const itemWidth = (s: string) => {
+    let w = 0;
+    for (const ch of s) {
+      const cp = ch.codePointAt(0) ?? 0;
+      if (
+        (cp >= 0x1100 && cp <= 0x115F) ||
+        (cp >= 0x2E80 && cp <= 0x303E) ||
+        (cp >= 0x3040 && cp <= 0x33FF) ||
+        (cp >= 0x3400 && cp <= 0x4DBF) ||
+        (cp >= 0x4E00 && cp <= 0x9FFF) ||
+        (cp >= 0xAC00 && cp <= 0xD7FF) ||
+        (cp >= 0xF900 && cp <= 0xFAFF) ||
+        (cp >= 0xFF00 && cp <= 0xFF60) ||
+        (cp >= 0x1B000 && cp <= 0x1B0FF) ||
+        (cp >= 0x20000 && cp <= 0x2FFFD) ||
+        (cp >= 0x30000 && cp <= 0x3FFFD)
+      ) {
+        w += 2;
+      } else {
+        w += 1;
+      }
+    }
+    return w;
+  };
   let logOffset = 1; // paddingX left
   if (!inputFocused && !searchMode) {
     for (const s of fixedItems) {
