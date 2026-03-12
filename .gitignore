@@ -1,3 +1,8 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Jekyll build output
+_site/
+docs/.jekyll-cache/
+docs/vendor/
