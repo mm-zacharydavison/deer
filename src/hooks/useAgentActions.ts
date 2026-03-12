@@ -399,6 +399,7 @@ export function useAgentActions({
       appendLog(agent, t("log_pr_created", { url: result.prUrl }), true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      appendLog(agent, `[pr] Error: ${msg}`, true);
       agent.status = transition(agent.status, "PR_FAILED") ?? agent.status;
       agent.error = msg;
       agent.lastActivity = t("activity_pr_failed", { msg: truncate(msg, 120) });
@@ -439,6 +440,7 @@ export function useAgentActions({
       appendLog(agent, t("log_pr_updated", { url: agent.result.prUrl }), true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      appendLog(agent, `[pr] Error: ${msg}`, true);
       agent.lastActivity = t("activity_pr_update_failed", { msg: truncate(msg, 120) });
     } finally {
       agent.updatingPr = false;
