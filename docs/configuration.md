@@ -28,13 +28,25 @@ Configuration is layered — later sources override earlier ones:
 
 | Flag | Description |
 |------|-------------|
-| `--lang=<locale>` | Set the display language. Accepted values: `jp` or `ja` (Japanese). Omit for English (default). Also localises generated PR titles and descriptions; branch names stay ASCII. |
+| `--lang=<code>` | Set the display language. See supported values below. Omit for English (default). Also localises generated PR titles and descriptions; branch names stay ASCII. |
+
+**Supported languages:**
+
+| Language | `--lang=` value | LLM-translated |
+|----------|----------------|:--------------:|
+| English | *(default)* | |
+| Japanese (日本語) | `ja` | |
+| Chinese Simplified (简体中文) | `zh` | ✓ |
+| Korean (한국어) | `ko` | ✓ |
+| Russian (русский) | `ru` | ✓ |
+
+LLM-translated languages may contain errors. PRs to improve translations are welcome — edit the relevant block in [`src/i18n.ts`](https://github.com/zdavison/deer/blob/main/src/i18n.ts).
 
 **Language detection priority** (first match wins):
 
-1. `--lang=jp` / `--lang=ja` CLI flag
-2. `CLAUDE_CODE_LOCALE` environment variable (e.g. `CLAUDE_CODE_LOCALE=ja`)
-3. System `LANG` environment variable (e.g. `LANG=ja_JP.UTF-8`)
+1. `--lang=<code>` CLI flag
+2. `CLAUDE_CODE_LOCALE` environment variable (e.g. `CLAUDE_CODE_LOCALE=zh`)
+3. System `LANG` environment variable (e.g. `LANG=zh_CN.UTF-8`)
 4. Default: English
 
 ---

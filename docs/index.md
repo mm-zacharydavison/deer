@@ -123,20 +123,30 @@ While attached, a `tmux` status bar is displayed with basic instructions on how 
 
 ## Language
 
-The dashboard UI and generated PR content can be displayed in Japanese:
+The dashboard UI and generated PR content can be displayed in multiple languages:
+
+| Language | `--lang=` value | LLM-translated |
+|----------|----------------|:--------------:|
+| English | *(default)* | |
+| Japanese (日本語) | `ja` | |
+| Chinese Simplified (简体中文) | `zh` | ✓ |
+| Korean (한국어) | `ko` | ✓ |
+| Russian (русский) | `ru` | ✓ |
 
 ```sh
-deer --lang=jp
+deer --lang=zh
 ```
 
 Language is detected in this order (first match wins):
 
-1. `--lang=jp` or `--lang=ja` CLI flag
-2. `CLAUDE_CODE_LOCALE` environment variable (e.g. `CLAUDE_CODE_LOCALE=ja`)
-3. System `LANG` environment variable (e.g. `LANG=ja_JP.UTF-8`)
+1. `--lang=<code>` CLI flag
+2. `CLAUDE_CODE_LOCALE` environment variable (e.g. `CLAUDE_CODE_LOCALE=zh`)
+3. System `LANG` environment variable (e.g. `LANG=zh_CN.UTF-8`)
 4. Default: English
 
 Setting a non-English language also instructs the agent to write PR titles and descriptions in that language. Branch names remain short kebab-case ASCII English regardless of the selected language.
+
+LLM-translated languages may contain errors. PRs to improve translations are welcome — edit the relevant block in [`src/i18n.ts`](https://github.com/zdavison/deer/blob/main/src/i18n.ts).
 
 ---
 

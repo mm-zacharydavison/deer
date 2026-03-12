@@ -8,7 +8,7 @@
 //   t("header_idle")                        // "idle" | "待機中"
 //   t("header_active", { n: 3 })            // "3 active" | "3件実行中"
 
-export type Lang = "en" | "ja";
+export type Lang = "en" | "ja" | "zh" | "ko" | "ru";
 
 const strings = {
   en: {
@@ -192,6 +192,280 @@ const strings = {
     preflight_gh_missing: "gh CLIが利用できません",
     preflight_no_credentials: "認証情報がありません — CLAUDE_CODE_OAUTH_TOKEN を設定するか、~/.claude/agent-oauth-token を作成するか、ANTHROPIC_API_KEY を設定してください",
   },
+
+  zh: {
+    // Header
+    header_title: "🦌 deer",
+    header_active: "{n} 个任务运行中",
+    header_idle: "空闲",
+
+    // Agent list
+    agents_empty: "在下方输入提示并按 Enter 启动代理",
+
+    // Quit confirmation
+    quit_confirm: "{n} 个代理运行中 — 退出？(y/n)",
+
+    // Search
+    search_no_matches: "无匹配",
+
+    // Input bar
+    input_tab_hint: "按 Tab 输入提示",
+    input_placeholder: "输入提示并按 Enter 启动代理 (Shift+Enter 或 /↵ 换行)",
+    input_preflight_failed: "预检失败",
+
+    // Shortcuts bar
+    shortcuts_focus: "聚焦",
+    shortcuts_nav: "↑↓",
+    shortcuts_search: "搜索",
+    shortcuts_select: "选择",
+    shortcuts_cancel: "取消",
+    shortcuts_quit: "退出",
+    shortcuts_verbose_on: " (开)",
+    label_agent: "代理",
+    cred_subscription: "订阅",
+    cred_api_token: "API密钥",
+    cred_none: "无凭据",
+
+    // Action labels (keybinding bar)
+    action_attach: "附加",
+    action_create_pr: "创建PR",
+    action_open_pr: "打开PR",
+    action_update_pr: "更新PR",
+    action_kill: "终止",
+    action_delete: "删除",
+    action_toggle_logs: "日志",
+    action_copy_logs: "复制",
+    action_toggle_verbose: "详细",
+    action_retry: "重试",
+    action_open_shell: "终端",
+
+    // Confirmation prompts
+    confirm_kill: "终止此代理？(y/n)",
+    confirm_delete_running: "代理仍在运行 — 删除？(y/n)",
+    confirm_delete_no_pr: "未创建PR — 删除并丢失工作？(y/n)",
+    confirm_retry_running: "代理仍在运行 — 终止并重试？(y/n)",
+
+    // Agent activity status strings
+    activity_setting_up: "正在设置沙箱...",
+    activity_running: "Claude 运行中...",
+    activity_idle_attach: "空闲 \u2014 按 \u23CE 附加",
+    activity_idle_update_pr: "空闲 \u2014 按 u 更新PR，\u23CE 附加",
+    activity_idle_create_pr: "空闲 \u2014 按 p 创建PR，\u23CE 附加",
+    activity_cancelled: "已被用户取消",
+    activity_interrupted: "已中断 — deer 已关闭",
+    activity_creating_pr: "正在创建PR...",
+    activity_pr_created: "PR已创建",
+    activity_pr_failed: "PR失败: {msg}",
+    activity_updating_pr: "正在更新PR...",
+    activity_pr_updated: "PR已更新",
+    activity_pr_update_failed: "PR更新失败: {msg}",
+
+    // Log messages
+    log_tmux_exited: "[tmux] Claude 进程已退出",
+    log_deer_idle: "[deer] Claude 空闲中",
+    log_setup_resuming: "[setup] 恢复会话...",
+    log_setup_creating: "[setup] 正在创建工作树和沙箱...",
+    log_running_started: "[running] Claude 已在 tmux 会话中启动: {session}",
+    log_deer_resuming: "[deer] 重启后恢复会话...",
+    log_pr_starting_create: "[pr] 开始创建PR...",
+    log_pr_starting_update: "[pr] 开始更新PR...",
+    log_pr_created: "[pr] PR已创建: {url}",
+    log_pr_updated: "[pr] PR已更新: {url}",
+
+    // Preflight errors
+    preflight_srt_missing: "@anthropic-ai/sandbox-runtime 未安装 — 运行: bunx @zdavison/deer install",
+    preflight_sandbox_exec_broken: "sandbox-exec 无法正常工作 — 请确认 /usr/bin 在 PATH 中",
+    preflight_sandbox_exec_missing: "sandbox-exec 不可用 — macOS srt 沙箱需要此程序",
+    preflight_bwrap_missing: "bwrap 不可用 — 请安装 bubblewrap (Linux srt 需要)",
+    preflight_tmux_missing: "tmux 不可用",
+    preflight_claude_missing: "claude CLI 不可用",
+    preflight_gh_auth_missing: "gh 未配置授权 — 运行 'gh auth login'",
+    preflight_gh_missing: "gh CLI 不可用",
+    preflight_no_credentials: "无凭据 — 请设置 CLAUDE_CODE_OAUTH_TOKEN，创建 ~/.claude/agent-oauth-token，或设置 ANTHROPIC_API_KEY",
+  },
+
+  ko: {
+    // Header
+    header_title: "🦌 deer",
+    header_active: "{n}개 실행 중",
+    header_idle: "대기 중",
+
+    // Agent list
+    agents_empty: "아래에 프롬프트를 입력하고 Enter를 눌러 에이전트를 시작하세요",
+
+    // Quit confirmation
+    quit_confirm: "{n}개의 에이전트가 실행 중입니다 — 종료할까요? (y/n)",
+
+    // Search
+    search_no_matches: "일치 없음",
+
+    // Input bar
+    input_tab_hint: "Tab을 눌러 프롬프트를 입력하세요",
+    input_placeholder: "프롬프트를 입력하고 Enter를 눌러 에이전트 시작 (Shift+Enter 또는 /↵로 줄바꿈)",
+    input_preflight_failed: "프리플라이트 검사 실패",
+
+    // Shortcuts bar
+    shortcuts_focus: "포커스",
+    shortcuts_nav: "↑↓",
+    shortcuts_search: "검색",
+    shortcuts_select: "선택",
+    shortcuts_cancel: "취소",
+    shortcuts_quit: "종료",
+    shortcuts_verbose_on: " (켜짐)",
+    label_agent: "에이전트",
+    cred_subscription: "구독",
+    cred_api_token: "API 토큰",
+    cred_none: "자격 증명 없음",
+
+    // Action labels (keybinding bar)
+    action_attach: "연결",
+    action_create_pr: "PR 생성",
+    action_open_pr: "PR 열기",
+    action_update_pr: "PR 업데이트",
+    action_kill: "강제 종료",
+    action_delete: "삭제",
+    action_toggle_logs: "로그",
+    action_copy_logs: "복사",
+    action_toggle_verbose: "상세",
+    action_retry: "재시도",
+    action_open_shell: "셸",
+
+    // Confirmation prompts
+    confirm_kill: "이 에이전트를 강제 종료할까요? (y/n)",
+    confirm_delete_running: "에이전트가 실행 중입니다 — 삭제할까요? (y/n)",
+    confirm_delete_no_pr: "PR이 생성되지 않았습니다 — 삭제하고 작업을 잃을까요? (y/n)",
+    confirm_retry_running: "에이전트가 실행 중입니다 — 강제 종료하고 재시도할까요? (y/n)",
+
+    // Agent activity status strings
+    activity_setting_up: "샌드박스 설정 중...",
+    activity_running: "Claude 실행 중...",
+    activity_idle_attach: "대기 중 \u2014 \u23CE를 눌러 연결",
+    activity_idle_update_pr: "대기 중 \u2014 u로 PR 업데이트, \u23CE로 연결",
+    activity_idle_create_pr: "대기 중 \u2014 p로 PR 생성, \u23CE로 연결",
+    activity_cancelled: "사용자에 의해 취소됨",
+    activity_interrupted: "중단됨 — deer가 종료되었습니다",
+    activity_creating_pr: "PR 생성 중...",
+    activity_pr_created: "PR 생성됨",
+    activity_pr_failed: "PR 실패: {msg}",
+    activity_updating_pr: "PR 업데이트 중...",
+    activity_pr_updated: "PR 업데이트됨",
+    activity_pr_update_failed: "PR 업데이트 실패: {msg}",
+
+    // Log messages
+    log_tmux_exited: "[tmux] Claude 프로세스가 종료되었습니다",
+    log_deer_idle: "[deer] Claude가 대기 중입니다",
+    log_setup_resuming: "[setup] 세션 재개 중...",
+    log_setup_creating: "[setup] 워크트리와 샌드박스 생성 중...",
+    log_running_started: "[running] Claude가 tmux 세션에서 시작되었습니다: {session}",
+    log_deer_resuming: "[deer] 재시작 후 세션 재개 중...",
+    log_pr_starting_create: "[pr] PR 생성 시작...",
+    log_pr_starting_update: "[pr] PR 업데이트 시작...",
+    log_pr_created: "[pr] PR 생성됨: {url}",
+    log_pr_updated: "[pr] PR 업데이트됨: {url}",
+
+    // Preflight errors
+    preflight_srt_missing: "@anthropic-ai/sandbox-runtime이 설치되지 않았습니다 — 실행: bunx @zdavison/deer install",
+    preflight_sandbox_exec_broken: "sandbox-exec가 작동하지 않습니다 — /usr/bin이 PATH에 있는지 확인하세요",
+    preflight_sandbox_exec_missing: "sandbox-exec를 사용할 수 없습니다 — macOS srt 샌드박스에 필요합니다",
+    preflight_bwrap_missing: "bwrap를 사용할 수 없습니다 — bubblewrap를 설치하세요 (Linux srt에 필요)",
+    preflight_tmux_missing: "tmux를 사용할 수 없습니다",
+    preflight_claude_missing: "claude CLI를 사용할 수 없습니다",
+    preflight_gh_auth_missing: "gh 인증이 구성되지 않았습니다 — 'gh auth login'을 실행하세요",
+    preflight_gh_missing: "gh CLI를 사용할 수 없습니다",
+    preflight_no_credentials: "자격 증명 없음 — CLAUDE_CODE_OAUTH_TOKEN을 설정하거나, ~/.claude/agent-oauth-token을 생성하거나, ANTHROPIC_API_KEY를 설정하세요",
+  },
+
+  ru: {
+    // Header
+    header_title: "🦌 deer",
+    header_active: "{n} активных",
+    header_idle: "простой",
+
+    // Agent list
+    agents_empty: "Введите запрос ниже и нажмите Enter, чтобы запустить агент",
+
+    // Quit confirmation
+    quit_confirm: "{n} агентов запущено — выйти? (y/n)",
+
+    // Search
+    search_no_matches: "нет совпадений",
+
+    // Input bar
+    input_tab_hint: "нажмите Tab для ввода запроса",
+    input_placeholder: "введите запрос и нажмите Enter для запуска агента (Shift+Enter или /↵ для новой строки)",
+    input_preflight_failed: "предварительные проверки не пройдены",
+
+    // Shortcuts bar
+    shortcuts_focus: "фокус",
+    shortcuts_nav: "↑↓",
+    shortcuts_search: "поиск",
+    shortcuts_select: "выбор",
+    shortcuts_cancel: "отмена",
+    shortcuts_quit: "выход",
+    shortcuts_verbose_on: " (вкл)",
+    label_agent: "агент",
+    cred_subscription: "подписка",
+    cred_api_token: "API-токен",
+    cred_none: "нет учётных данных",
+
+    // Action labels (keybinding bar)
+    action_attach: "подключить",
+    action_create_pr: "создать PR",
+    action_open_pr: "открыть PR",
+    action_update_pr: "обновить PR",
+    action_kill: "завершить",
+    action_delete: "удалить",
+    action_toggle_logs: "логи",
+    action_copy_logs: "копировать",
+    action_toggle_verbose: "подробно",
+    action_retry: "повтор",
+    action_open_shell: "шелл",
+
+    // Confirmation prompts
+    confirm_kill: "Завершить этот агент? (y/n)",
+    confirm_delete_running: "Агент ещё работает — удалить? (y/n)",
+    confirm_delete_no_pr: "PR не создан — удалить и потерять работу? (y/n)",
+    confirm_retry_running: "Агент ещё работает — завершить и повторить? (y/n)",
+
+    // Agent activity status strings
+    activity_setting_up: "Настройка песочницы...",
+    activity_running: "Claude работает...",
+    activity_idle_attach: "Простой \u2014 нажмите \u23CE для подключения",
+    activity_idle_update_pr: "Простой \u2014 u для обновления PR, \u23CE для подключения",
+    activity_idle_create_pr: "Простой \u2014 p для создания PR, \u23CE для подключения",
+    activity_cancelled: "Отменено пользователем",
+    activity_interrupted: "Прервано — deer был закрыт",
+    activity_creating_pr: "Создание PR...",
+    activity_pr_created: "PR создан",
+    activity_pr_failed: "Ошибка PR: {msg}",
+    activity_updating_pr: "Обновление PR...",
+    activity_pr_updated: "PR обновлён",
+    activity_pr_update_failed: "Ошибка обновления PR: {msg}",
+
+    // Log messages
+    log_tmux_exited: "[tmux] Процесс Claude завершился",
+    log_deer_idle: "[deer] Claude бездействует",
+    log_setup_resuming: "[setup] Возобновление сессии...",
+    log_setup_creating: "[setup] Создание рабочего дерева и песочницы...",
+    log_running_started: "[running] Claude запущен в сессии tmux: {session}",
+    log_deer_resuming: "[deer] Возобновление сессии после перезапуска...",
+    log_pr_starting_create: "[pr] Начало создания PR...",
+    log_pr_starting_update: "[pr] Начало обновления PR...",
+    log_pr_created: "[pr] PR создан: {url}",
+    log_pr_updated: "[pr] PR обновлён: {url}",
+
+    // Preflight errors
+    preflight_srt_missing: "@anthropic-ai/sandbox-runtime не установлен — выполните: bunx @zdavison/deer install",
+    preflight_sandbox_exec_broken: "sandbox-exec не работает — убедитесь, что /usr/bin есть в PATH",
+    preflight_sandbox_exec_missing: "sandbox-exec недоступен — необходим для srt-песочницы на macOS",
+    preflight_bwrap_missing: "bwrap недоступен — установите bubblewrap (необходим для srt на Linux)",
+    preflight_tmux_missing: "tmux недоступен",
+    preflight_claude_missing: "CLI claude недоступен",
+    preflight_gh_auth_missing: "gh не авторизован — выполните 'gh auth login'",
+    preflight_gh_missing: "CLI gh недоступен",
+    preflight_no_credentials: "Нет учётных данных — установите CLAUDE_CODE_OAUTH_TOKEN, создайте ~/.claude/agent-oauth-token или установите ANTHROPIC_API_KEY",
+  },
+
 } as const;
 
 export type StringKey = keyof typeof strings.en;
@@ -214,6 +488,9 @@ export function getLang(): Lang {
 const PR_LANGUAGE_NAMES: Record<Lang, string | null> = {
   en: null,
   ja: "Japanese (日本語)",
+  zh: "Chinese Simplified (简体中文)",
+  ko: "Korean (한국어)",
+  ru: "Russian (русский)",
 };
 
 /**
@@ -226,20 +503,29 @@ export function getPRLanguage(): string | null {
 
 /**
  * Detect language from CLI args, CLAUDE_CODE_LOCALE, or system LANG.
- * Priority: --lang=jp/ja > CLAUDE_CODE_LOCALE > system LANG > "en"
+ * Priority: --lang=<code> > CLAUDE_CODE_LOCALE > system LANG > "en"
  */
 export function detectLang(): Lang {
   const langArg = process.argv.find((a) => a.startsWith("--lang="));
   if (langArg) {
     const val = langArg.split("=")[1]?.toLowerCase();
     if (val === "jp" || val === "ja") return "ja";
+    if (val === "zh" || val === "zh-cn" || val === "zh_cn") return "zh";
+    if (val === "ko") return "ko";
+    if (val === "ru") return "ru";
   }
 
   const claudeLocale = process.env.CLAUDE_CODE_LOCALE;
   if (claudeLocale?.toLowerCase().startsWith("ja")) return "ja";
+  if (claudeLocale?.toLowerCase().startsWith("zh")) return "zh";
+  if (claudeLocale?.toLowerCase().startsWith("ko")) return "ko";
+  if (claudeLocale?.toLowerCase().startsWith("ru")) return "ru";
 
   const sysLang = process.env.LANG;
   if (sysLang?.toLowerCase().startsWith("ja")) return "ja";
+  if (sysLang?.toLowerCase().startsWith("zh")) return "zh";
+  if (sysLang?.toLowerCase().startsWith("ko")) return "ko";
+  if (sysLang?.toLowerCase().startsWith("ru")) return "ru";
 
   return "en";
 }
