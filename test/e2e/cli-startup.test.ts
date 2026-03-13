@@ -2,7 +2,7 @@
  * CLI startup E2E tests.
  *
  * Verify that deer launches, renders the TUI, and exits cleanly.
- * Uses node-pty + @xterm/headless to drive the TUI as a real terminal process.
+ * Uses tmux to drive the TUI as a real terminal process.
  */
 
 import { describe, test, expect, setDefaultTimeout } from "bun:test";

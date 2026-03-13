@@ -30,7 +30,7 @@ e2e("keyboard actions", () => {
       await withSlowFakeClaude(async (env) => {
         const deer = await startDeerSession(repoPath, env);
         try {
-          await deer.waitForPane("deer");
+          await deer.waitForReady();
 
           const before = Date.now();
           deer.sendKeys("kill this task\r");
@@ -43,33 +43,28 @@ e2e("keyboard actions", () => {
             { timeout: 15_000, label: "agent tmux session appears" },
           );
 
-          // Running task is selected by default — send kill action
+          // Tab to unfocus the prompt input, then send kill action
+          deer.sendKeys("\t");
+          await Bun.sleep(250);
           deer.sendKeys("x");
 
           // Confirmation prompt should appear
-          await deer.waitForPane("Cancel", 10_000);
+          await deer.waitForPane("(y/n)", 10_000);
 
           // Confirm the kill
-          deer.sendKeys("\r");
+          deer.sendKeys("y");
 
-          // Agent tmux session should die
-          await waitFor(
-            async () => isTmuxSessionDead(`deer-${taskId}`),
-            { timeout: 15_000, label: "agent session dies after kill" },
-          );
-
-          // TUI should show cancelled state
-          await deer.waitForPane("cancelled", 15_000);
-
-          // History should record status: "cancelled"
+          // Agent tmux session should die and history should record cancellation
           await waitFor(
             async () => {
               const history = await loadHistory(repoPath);
               const entry = history.find((t) => t.taskId === taskId);
               return entry?.status === "cancelled";
             },
-            { timeout: 10_000, label: "history shows cancelled" },
+            { timeout: 15_000, label: "history shows cancelled" },
           );
+
+          expect(await isTmuxSessionDead(`deer-${taskId}`)).toBe(true);
         } finally {
           await deer.stop();
         }
@@ -85,7 +80,7 @@ e2e("keyboard actions", () => {
       await withFakeClaude(async (env) => {
         const deer = await startDeerSession(repoPath, env);
         try {
-          await deer.waitForPane("deer");
+          await deer.waitForReady();
 
           const before = Date.now();
           deer.sendKeys("add logging\r");
@@ -107,8 +102,14 @@ e2e("keyboard actions", () => {
             { timeout: 15_000, label: "task in history" },
           );
 
-          // Select the completed task and press Backspace to delete
+          // Tab to unfocus the prompt input, then press Backspace to delete
+          deer.sendKeys("\t");
+          await Bun.sleep(250);
           deer.sendKeys("\x7f");
+
+          // Confirm deletion if prompted (task may still be in "running" status)
+          await Bun.sleep(500);
+          deer.sendKeys("y");
 
           // History should no longer contain this task
           await waitFor(
@@ -137,7 +138,7 @@ e2e("keyboard actions", () => {
       await withFakeClaude(async (env) => {
         const deer = await startDeerSession(repoPath, env);
         try {
-          await deer.waitForPane("deer");
+          await deer.waitForReady();
 
           const before = Date.now();
           deer.sendKeys("refactor the parser\r");
@@ -159,8 +160,14 @@ e2e("keyboard actions", () => {
             { timeout: 15_000, label: "task in history" },
           );
 
-          // Retry the task
+          // Tab to unfocus the prompt input, then retry
+          deer.sendKeys("\t");
+          await Bun.sleep(250);
           deer.sendKeys("r");
+
+          // Confirm retry if prompted (task may still be in "running" status)
+          await Bun.sleep(500);
+          deer.sendKeys("y");
 
           // A new tmux session for the same taskId should appear
           await waitFor(

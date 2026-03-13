@@ -86,6 +86,11 @@ export async function removeWorktree(
   repoPath: string,
   worktreePath: string
 ): Promise<void> {
+  // Detect the branch name before removing the worktree
+  const branchResult =
+    await Bun.$`git -C ${worktreePath} rev-parse --abbrev-ref HEAD`.quiet().nothrow();
+  const branch = branchResult.exitCode === 0 ? branchResult.stdout.toString().trim() : null;
+
   const result =
     await Bun.$`git -C ${repoPath} worktree remove ${worktreePath} --force`.quiet();
 
@@ -93,5 +98,10 @@ export async function removeWorktree(
     throw new Error(
       `Failed to remove worktree: ${result.stderr.toString()}`
     );
+  }
+
+  // Clean up the worktree branch if it was a deer branch
+  if (branch?.startsWith("deer/")) {
+    await Bun.$`git -C ${repoPath} branch -D ${branch}`.quiet().nothrow();
   }
 }

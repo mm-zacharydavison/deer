@@ -87,7 +87,7 @@ function buildHomeDenyList(requiredPaths: string[]): string[] {
 /**
  * Build an SRT settings JSON object from deer's sandbox options.
  */
-function buildSrtSettings(options: SandboxRuntimeOptions): Record<string, unknown> {
+function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | null): Record<string, unknown> {
   const claudeDir = join(HOME, ".claude");
 
   const network: Record<string, unknown> = {
@@ -111,6 +111,7 @@ function buildSrtSettings(options: SandboxRuntimeOptions): Record<string, unknow
     dirname(options.worktreePath),
     ...(options.repoGitDir ? [options.repoGitDir] : []),
     ...(process.env.PATH?.split(":").filter((p) => p.startsWith(HOME)) ?? []),
+    ...(srtBinDir ? [srtBinDir] : []),
   ];
 
   // Deny read access to all HOME entries except .claude* and required roots.
@@ -150,13 +151,14 @@ function buildSrtSettings(options: SandboxRuntimeOptions): Record<string, unknow
  */
 export function createSrtRuntime(): SandboxRuntime {
   const srtBin = resolveSrtBin();
+  const srtBinDir = srtBin === "srt" ? null : dirname(dirname(srtBin)); // package root
   let settingsPath = "";
 
   return {
     name: "srt",
 
     async prepare(options: SandboxRuntimeOptions): Promise<SandboxCleanup> {
-      const settings = buildSrtSettings(options);
+      const settings = buildSrtSettings(options, srtBinDir);
 
       // Write settings file next to the worktree
       settingsPath = join(dirname(options.worktreePath), "srt-settings.json");

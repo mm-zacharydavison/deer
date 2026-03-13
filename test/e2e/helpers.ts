@@ -1,5 +1,3 @@
-import * as pty from "node-pty";
-import { Terminal } from "@xterm/headless";
 import { mkdtemp, rm, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -12,9 +10,11 @@ export interface DeerSession {
   sendKeys: (keys: string) => void;
   /** Poll the screen buffer until any row contains text, or throw on timeout. */
   waitForPane: (text: string, timeoutMs?: number) => Promise<void>;
-  /** Returns the current screen contents as an array of rows (flushes pending writes). */
+  /** Wait for preflight to complete and the prompt input to be active. */
+  waitForReady: (timeoutMs?: number) => Promise<void>;
+  /** Returns the current screen contents as an array of rows. */
   getScreen: () => Promise<string[]>;
-  /** Kill the PTY process and clean up. */
+  /** Kill the tmux session and clean up. */
   stop: () => Promise<void>;
 }
 
@@ -37,12 +37,60 @@ export async function waitFor(
   throw new Error(`waitFor("${label}") timed out after ${timeout}ms`);
 }
 
+// ── tmux helpers ─────────────────────────────────────────────────────
+
+let sessionCounter = 0;
+
+/** Capture the visible pane contents as an array of trimmed-right rows. */
+async function captureTmuxPane(session: string): Promise<string[]> {
+  const result = await Bun.$`tmux capture-pane -t ${session} -p`.quiet().nothrow();
+  if (result.exitCode !== 0) return [];
+  return result.stdout.toString().split("\n");
+}
+
+/**
+ * Map JS control characters to tmux send-keys arguments.
+ *
+ * tmux send-keys with `-l` sends literal text, but control characters
+ * need to be sent as named keys or hex sequences.
+ */
+function sendKeysToTmux(session: string, keys: string): void {
+  // Split into segments of literal text and control characters
+  let i = 0;
+  while (i < keys.length) {
+    const ch = keys[i];
+
+    if (ch === "\r") {
+      Bun.spawnSync(["tmux", "send-keys", "-t", session, "Enter"]);
+      i++;
+    } else if (ch === "\t") {
+      Bun.spawnSync(["tmux", "send-keys", "-t", session, "Tab"]);
+      i++;
+    } else if (ch === "\x7f") {
+      Bun.spawnSync(["tmux", "send-keys", "-t", session, "BSpace"]);
+      i++;
+    } else if (ch === "\x1b") {
+      Bun.spawnSync(["tmux", "send-keys", "-t", session, "Escape"]);
+      i++;
+    } else {
+      // Collect consecutive literal characters
+      let literal = "";
+      while (i < keys.length && keys[i] !== "\r" && keys[i] !== "\t" && keys[i] !== "\x7f" && keys[i] !== "\x1b") {
+        literal += keys[i];
+        i++;
+      }
+      Bun.spawnSync(["tmux", "send-keys", "-t", session, "-l", literal]);
+    }
+  }
+}
+
 // ── Session management ────────────────────────────────────────────────
 
 /**
- * Spawn deer TUI in a real PTY using node-pty + @xterm/headless.
- * The xterm Terminal interprets VT100/ANSI sequences from the PTY output
- * and maintains a virtual screen buffer that can be queried like a DOM.
+ * Spawn deer TUI inside a tmux session.
+ *
+ * Uses tmux as the PTY provider instead of node-pty, which avoids
+ * Bun's incomplete libuv compatibility for native PTY addons.
  *
  * Optionally pass a custom command to run instead of `bun run src/cli.tsx`
  * (e.g. for the build-smoke test which uses the compiled binary).
@@ -54,55 +102,56 @@ export async function startDeerSession(
 ): Promise<DeerSession> {
   const cols = 120;
   const rows = 40;
-  const term = new Terminal({ cols, rows, allowProposedApi: true });
+  const session = `deer-e2e-${process.pid}-${sessionCounter++}`;
 
-  const command =
+  // Resolve command using the *host* PATH so env overrides (like a
+  // restricted PATH for testing) don't prevent the runtime from launching.
+  const rawCommand =
     options.command ?? ["bun", "run", join(import.meta.dir, "../../src/cli.tsx")];
-  const [file, ...args] = command;
+  const resolvedBin = rawCommand[0].includes("/")
+    ? rawCommand[0]
+    : Bun.which(rawCommand[0]) ?? rawCommand[0];
+  const command = [resolvedBin, ...rawCommand.slice(1)];
+  const shellCmd = command.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
 
-  const proc = pty.spawn(file, args, {
-    name: "xterm-256color",
-    cols,
-    rows,
-    cwd: repoPath,
-    env: { ...process.env, ...extraEnv } as Record<string, string>,
-  });
+  // Build env export prefix
+  const envExports = Object.entries(extraEnv)
+    .map(([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`)
+    .join("; ");
 
-  // Track pending writes so getScreen() always reflects the latest output.
-  let writeChain = Promise.resolve();
-  proc.onData((data) => {
-    writeChain = writeChain.then(
-      () => new Promise<void>((resolve) => term.write(data, resolve)),
-    );
-  });
+  const fullCmd = envExports ? `${envExports}; exec ${shellCmd}` : `exec ${shellCmd}`;
 
-  function readBuffer(): string[] {
-    const lines: string[] = [];
-    for (let i = 0; i < rows; i++) {
-      lines.push(term.buffer.active.getLine(i)?.translateToString(true) ?? "");
-    }
-    return lines;
-  }
+  await Bun.$`tmux new-session -d -s ${session} -x ${cols} -y ${rows} -c ${repoPath} ${fullCmd}`.quiet();
+
+  // Brief pause to let the TUI initialize
+  await Bun.sleep(500);
 
   return {
-    sendKeys: (keys: string) => proc.write(keys),
+    sendKeys: (keys: string) => sendKeysToTmux(session, keys),
 
     waitForPane: (text: string, timeoutMs = 15_000) =>
       waitFor(
         async () => {
-          await writeChain;
-          return readBuffer().some((l) => l.includes(text));
+          const lines = await captureTmuxPane(session);
+          return lines.some((l) => l.includes(text));
         },
         { timeout: timeoutMs, label: `pane contains "${text}"` },
       ),
 
-    getScreen: async () => {
-      await writeChain;
-      return readBuffer();
-    },
+    waitForReady: (timeoutMs = 15_000) =>
+      waitFor(
+        async () => {
+          const lines = await captureTmuxPane(session);
+          // "type prompt" appears in the input placeholder once preflight completes
+          return lines.some((l) => l.includes("type prompt"));
+        },
+        { timeout: timeoutMs, label: "prompt input ready" },
+      ),
+
+    getScreen: () => captureTmuxPane(session),
 
     stop: async () => {
-      proc.kill();
+      await Bun.$`tmux kill-session -t ${session}`.quiet().nothrow();
     },
   };
 }

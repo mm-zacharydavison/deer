@@ -24,7 +24,7 @@ e2e("agent lifecycle", () => {
       await withFakeClaude(async (env) => {
         const deer = await startDeerSession(repoPath, env);
         try {
-          await deer.waitForPane("deer");
+          await deer.waitForReady();
 
           const before = Date.now();
           deer.sendKeys("fix the bug\r");
@@ -53,7 +53,7 @@ e2e("agent lifecycle", () => {
             { timeout: 30_000, label: "agent tmux session dies (fake claude finished)" },
           );
 
-          // Wait for deer to process completion and write to history
+          // Wait for deer to persist the task to history
           await waitFor(
             async () => {
               const history = await loadHistory(repoPath);
@@ -62,11 +62,11 @@ e2e("agent lifecycle", () => {
             { timeout: 15_000, label: "task appears in history" },
           );
 
-          // Verify the task is no longer stuck as "running"
+          // The task should be idle (agent process exited, awaiting user PR action)
           const history = await loadHistory(repoPath);
           const entry = history.find((t) => t.taskId === taskId);
           expect(entry).not.toBeUndefined();
-          expect(entry!.status).not.toBe("running");
+          expect(entry!.idle).toBe(true);
         } finally {
           await deer.stop();
         }
@@ -82,7 +82,7 @@ e2e("agent lifecycle", () => {
       await withFakeClaude(async (env) => {
         const deer = await startDeerSession(repoPath, env);
         try {
-          await deer.waitForPane("deer");
+          await deer.waitForReady();
 
           const before = Date.now();
           deer.sendKeys("write a test\r");
@@ -118,7 +118,7 @@ e2e("agent lifecycle", () => {
       await withFakeClaude(async (env) => {
         const deer = await startDeerSession(repoPath, env);
         try {
-          await deer.waitForPane("deer");
+          await deer.waitForReady();
 
           const before = Date.now();
           deer.sendKeys("add some tests\r");
