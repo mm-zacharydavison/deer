@@ -219,6 +219,24 @@ export async function startAgent(options: AgentRunOptions): Promise<AgentHandle>
     await Bun.$`git -C ${worktreePath} config user.email "deer@noreply"`.quiet();
   }
 
+  // Run the setup command in the worktree before the sandbox starts.
+  // This is the right place for dependency installs (e.g. pnpm install).
+  if (!continueSession && config.defaults.setupCommand) {
+    onStatus?.({ phase: "setup", message: "Running setup command..." });
+    const proc = Bun.spawn(["sh", "-c", config.defaults.setupCommand], {
+      cwd: worktreePath,
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      await removeWorktree(repoPath, worktreePath).catch(() => {});
+      throw new Error(
+        `Setup command failed with exit code ${exitCode}: ${config.defaults.setupCommand}`,
+      );
+    }
+  }
+
   // Write a minimal gitconfig to the task dir so git never reads ~/.gitconfig
   // (which is blocked by the sandbox). GIT_CONFIG_GLOBAL points here instead.
   const gitconfigPath = join(dirname(worktreePath), "gitconfig");
