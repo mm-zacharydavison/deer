@@ -8,6 +8,8 @@ import { openUrl, isActive } from "../dashboard-utils";
 
 interface KeyboardInputDeps {
   suspended: boolean;
+  /** When the context picker is open, all keyboard handling is suspended so the picker owns input. */
+  pickerOpen: boolean;
   agents: AgentState[];
   setAgents: Dispatch<SetStateAction<AgentState[]>>;
   logExpanded: boolean;
@@ -41,6 +43,7 @@ function copyLogsToClipboard(agent: AgentState): void {
 
 export function useKeyboardInput({
   suspended,
+  pickerOpen,
   agents,
   setAgents: _setAgents,
   logExpanded,
@@ -258,7 +261,7 @@ export function useKeyboardInput({
   // ── Main input handler ────────────────────────────────────────────
 
   useInput((input, key) => {
-    if (suspended) return;
+    if (suspended || pickerOpen) return;
 
     if (handleSearchInput(input, key)) return;
     if (handleQuitInput(input)) return;

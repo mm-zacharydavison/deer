@@ -5,6 +5,10 @@ import { loadConfig } from "./config";
 import type { DeerConfig } from "./config";
 import { ShortcutsBar } from "./components/ShortcutsBar";
 import { LogDetailPanel } from "./components/LogDetailPanel";
+import { ContextPicker } from "./components/ContextPicker";
+import { ContextChipBar } from "./components/ContextChipBar";
+import { resolveChips } from "./context/resolve";
+import type { ContextChip } from "./context/types";
 import { runPreflight, type PreflightResult } from "./preflight";
 import { PromptInput } from "./components/PromptInput";
 import { useAgentSync } from "./hooks/useAgentSync";
@@ -39,6 +43,8 @@ export default function Dashboard({ cwd, mockAgents }: { cwd: string; mockAgents
   const termHeight = stdout?.rows || 24;
 
   const [suspended, setSuspended] = useState(false);
+  const [contextChips, setContextChips] = useState<ContextChip[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [preflight, setPreflight] = useState<PreflightResult | null>(
     mockAgents ? { ok: true, errors: [], credentialType: "subscription" } : null,
   );
@@ -82,6 +88,7 @@ export default function Dashboard({ cwd, mockAgents }: { cwd: string; mockAgents
     searchMatches,
   } = useKeyboardInput({
     suspended,
+    pickerOpen,
     agents,
     setAgents,
     logExpanded,
@@ -171,7 +178,10 @@ export default function Dashboard({ cwd, mockAgents }: { cwd: string; mockAgents
   const selected = agents[clampedIdx] || null;
   const preflightOk = preflight?.ok ?? false;
 
-  const chromeHeight = 8;
+  // Base chrome: header(1) + 2 separators(2) + input(1) + shortcuts(3) = 8.
+  // Add picker height (query bar + up to 5 results) or chip bar (1 line) when visible.
+  const contextChrome = pickerOpen ? 7 : contextChips.length > 0 ? 1 : 0;
+  const chromeHeight = 8 + contextChrome;
   const detailHeight = logExpanded && selected ? Math.min(MAX_VISIBLE_LOGS + 1, 6) : 0;
   const listHeight = Math.max(termHeight - chromeHeight - detailHeight, 3);
   const hasPrEntries = agents.some((a) => a.result?.prUrl);
@@ -299,8 +309,19 @@ export default function Dashboard({ cwd, mockAgents }: { cwd: string; mockAgents
         />
       )}
 
-      {/* Input divider + input bar */}
+      {/* Input divider + context picker/chips + input bar */}
       <Text>{"─".repeat(termWidth)}</Text>
+      {pickerOpen && (
+        <ContextPicker
+          repoPath={cwd}
+          onSelect={(chip) => {
+            setContextChips((prev) => [...prev, chip]);
+            setPickerOpen(false);
+          }}
+          onCancel={() => setPickerOpen(false)}
+        />
+      )}
+      {!pickerOpen && <ContextChipBar chips={contextChips} />}
       <Box paddingX={1} gap={1}>
         {searchMode ? (
           <>
@@ -325,12 +346,16 @@ export default function Dashboard({ cwd, mockAgents }: { cwd: string; mockAgents
               <PromptInput
                 key={inputKey}
                 placeholder={!preflightOk ? t("input_preflight_failed") : t("input_placeholder")}
-                isDisabled={!preflightOk}
+                isDisabled={!preflightOk || pickerOpen}
                 defaultValue={inputDefault}
+                onAtPrefix={() => setPickerOpen(true)}
+                onBackspaceOnEmpty={() => setContextChips((prev) => prev.slice(0, -1))}
                 onSubmit={(value) => {
                   if (value.trim()) {
                     addToHistory(value);
-                    spawnAgent(value);
+                    const { baseBranch } = resolveChips(contextChips);
+                    spawnAgent(value, baseBranch);
+                    setContextChips([]);
                   }
                 }}
               />

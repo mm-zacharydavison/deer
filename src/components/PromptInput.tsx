@@ -29,11 +29,17 @@ export function PromptInput({
   placeholder = "",
   isDisabled = false,
   onSubmit,
+  onAtPrefix,
+  onBackspaceOnEmpty,
 }: {
   defaultValue?: string;
   placeholder?: string;
   isDisabled?: boolean;
   onSubmit?: (value: string) => void;
+  /** Called when '@' is typed as the first character of an empty input. */
+  onAtPrefix?: () => void;
+  /** Called when Backspace is pressed and the input is already empty. */
+  onBackspaceOnEmpty?: () => void;
 }) {
   const [value, setValue] = useState(defaultValue);
   const [cursorOffset, setCursorOffset] = useState(defaultValue.length);
@@ -125,7 +131,9 @@ export function PromptInput({
         setCursorOffset(newCursor);
       } else if (key.backspace || key.delete) {
         const cur = cursorOffsetRef.current;
-        if (cur > 0) {
+        if (cur === 0) {
+          onBackspaceOnEmpty?.();
+        } else {
           const val = valueRef.current;
           const blocks = pasteBlocksRef.current;
           // If the cursor is inside (or at the end of) a paste block, delete the whole block.
@@ -162,6 +170,12 @@ export function PromptInput({
         // strip bracketed paste markers (\x1b[200~ ... \x1b[201~).
         let cleaned = input.replace(/\[\?\d+u/g, "");
         if (!cleaned) return;
+
+        // '@' typed as the first character of an empty input triggers the context picker.
+        if (cleaned === "@" && valueRef.current.length === 0) {
+          onAtPrefix?.();
+          return;
+        }
 
         let isBracketedPaste = false;
         let pasteStartIdx = cleaned.indexOf(PASTE_START);
