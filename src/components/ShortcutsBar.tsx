@@ -9,6 +9,7 @@ import { t, type StringKey } from "../i18n";
 interface ShortcutsBarProps {
   selected: AgentState | null;
   inputFocused: boolean;
+  inputEmpty: boolean;
   searchMode: boolean;
   verboseMode: boolean;
   logExpanded: boolean;
@@ -19,6 +20,7 @@ interface ShortcutsBarProps {
 export function ShortcutsBar({
   selected,
   inputFocused,
+  inputEmpty,
   searchMode,
   verboseMode,
   logExpanded,
@@ -100,6 +102,9 @@ export function ShortcutsBar({
         ) : (
           <>
             <Text><Text bold color="white">Tab</Text><Text dimColor> {t("shortcuts_focus")}</Text></Text>
+            {inputFocused && inputEmpty && (
+              <Text><Text bold color="white">@</Text><Text dimColor> context</Text></Text>
+            )}
             {!inputFocused && (
               <>
                 <Text><Text bold color="white">j/k</Text><Text dimColor> {t("shortcuts_nav")}</Text></Text>

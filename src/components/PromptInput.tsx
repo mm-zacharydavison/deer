@@ -31,6 +31,7 @@ export function PromptInput({
   onSubmit,
   onAtPrefix,
   onBackspaceOnEmpty,
+  onChange,
 }: {
   defaultValue?: string;
   placeholder?: string;
@@ -40,6 +41,8 @@ export function PromptInput({
   onAtPrefix?: () => void;
   /** Called when Backspace is pressed and the input is already empty. */
   onBackspaceOnEmpty?: () => void;
+  /** Called whenever the input value changes. */
+  onChange?: (value: string) => void;
 }) {
   const [value, setValue] = useState(defaultValue);
   const [cursorOffset, setCursorOffset] = useState(defaultValue.length);
@@ -53,6 +56,10 @@ export function PromptInput({
   valueRef.current = value;
   cursorOffsetRef.current = cursorOffset;
   pasteBlocksRef.current = pasteBlocks;
+
+  useEffect(() => {
+    onChange?.(value);
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Enable bracketed paste mode so the terminal wraps pasted text in
   // \x1b[200~ ... \x1b[201~ markers, delivering it as a single input event.

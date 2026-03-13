@@ -46,6 +46,7 @@ export default function Dashboard({ cwd, mockAgents }: { cwd: string; mockAgents
   const [suspended, setSuspended] = useState(false);
   const [contextChips, setContextChips] = useState<ContextChip[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [inputEmpty, setInputEmpty] = useState(true);
   const [preflight, setPreflight] = useState<PreflightResult | null>(
     mockAgents ? { ok: true, errors: [], credentialType: "subscription" } : null,
   );
@@ -363,12 +364,14 @@ export default function Dashboard({ cwd, mockAgents }: { cwd: string; mockAgents
                 defaultValue={inputDefault}
                 onAtPrefix={() => setPickerOpen(true)}
                 onBackspaceOnEmpty={() => setContextChips((prev) => prev.slice(0, -1))}
+                onChange={(v) => setInputEmpty(v.length === 0)}
                 onSubmit={(value) => {
                   if (value.trim()) {
                     addToHistory(value);
                     const { baseBranch } = resolveChips(contextChips);
                     spawnAgent(value, baseBranch);
                     setContextChips([]);
+                    setInputEmpty(true);
                   }
                 }}
               />
@@ -384,6 +387,7 @@ export default function Dashboard({ cwd, mockAgents }: { cwd: string; mockAgents
       <ShortcutsBar
         selected={selected}
         inputFocused={inputFocused}
+        inputEmpty={inputEmpty}
         searchMode={searchMode}
         verboseMode={verboseMode}
         logExpanded={logExpanded}
