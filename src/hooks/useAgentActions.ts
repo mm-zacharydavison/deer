@@ -341,13 +341,8 @@ export function useAgentActions({
         // Small delay to let any pending keypress (e.g. the Enter that triggered
         // attach) flush through before tmux takes over stdin.
         await Bun.sleep(50);
-        // Use async Bun.spawn so the event loop stays alive during attachment,
-        // allowing background work (e.g. PR creation) to continue unblocked.
-        await Bun.spawn(["tmux", "attach", "-t", sessionName], {
-          stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
-        }).exited;
+        const { spawnSync } = await import("node:child_process");
+        spawnSync("tmux", ["attach", "-t", sessionName], { stdio: "inherit" });
       });
     }
 
@@ -388,13 +383,8 @@ export function useAgentActions({
     } else {
       await withSuspendedTerminal(setSuspended, async () => {
         await Bun.sleep(50);
-        // Use async Bun.spawn so the event loop stays alive during attachment,
-        // allowing background work (e.g. PR creation) to continue unblocked.
-        await Bun.spawn(["tmux", "attach", "-t", sessionName], {
-          stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
-        }).exited;
+        const { spawnSync } = await import("node:child_process");
+        spawnSync("tmux", ["attach", "-t", sessionName], { stdio: "inherit" });
       });
     }
   }, [setSuspended]);
