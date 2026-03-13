@@ -9,7 +9,6 @@ import { dataDir } from "../src/task";
 import { DEFAULT_CONFIG } from "../src/config";
 import { createSrtRuntime } from "../src/sandbox/index";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 /**
@@ -377,6 +376,123 @@ describe("agent lifecycle", () => {
     let dirExists = false;
     try { statSync(taskDir); dirExists = true; } catch { /* gone */ }
     expect(dirExists).toBe(false);
+  });
+
+  test("startAgent runs setup_command in the worktree before the sandbox starts", async () => {
+    const repo = await createTestRepo();
+    repos.push(repo);
+
+    const handle = await startAgent({
+      repoPath: repo,
+      prompt: "test",
+      baseBranch: "main",
+      config: {
+        ...testConfig,
+        defaults: { ...testConfig.defaults, setupCommand: "touch setup-marker" },
+      },
+      runtime: createSrtRuntime(),
+    });
+    handles.push(handle);
+
+    const markerPath = join(handle.worktreePath, "setup-marker");
+    expect(await Bun.file(markerPath).exists()).toBe(true);
+  });
+
+  test("startAgent throws and cleans up worktree when setup_command fails", async () => {
+    const repo = await createTestRepo();
+    repos.push(repo);
+
+    let worktreePath: string | undefined;
+    let threw = false;
+    try {
+      const handle = await startAgent({
+        repoPath: repo,
+        prompt: "test",
+        baseBranch: "main",
+        config: {
+          ...testConfig,
+          defaults: { ...testConfig.defaults, setupCommand: "exit 1" },
+        },
+        runtime: createSrtRuntime(),
+        onStatus: (s) => {
+          if (s.phase === "setup" && "message" in s) {
+            // capture the worktree path from a deeper hook isn't easy here;
+            // we verify cleanup via the branch instead
+          }
+        },
+      });
+      handles.push(handle);
+      worktreePath = handle.worktreePath;
+    } catch {
+      threw = true;
+    }
+
+    expect(threw).toBe(true);
+
+    // The deer/<taskId> branch should not exist since worktree was cleaned up
+    const branches = await Bun.$`git -C ${repo} branch`.quiet().text();
+    expect(branches).not.toMatch(/deer\//);
+  });
+
+  test("startAgent skips setup_command when continueSession is provided", async () => {
+    const repo = await createTestRepo();
+    repos.push(repo);
+
+    // Start first agent (without setup_command) to get a worktree
+    const firstHandle = await startAgent({
+      repoPath: repo,
+      prompt: "echo hello",
+      baseBranch: "main",
+      config: testConfig,
+      runtime: createSrtRuntime(),
+    });
+    handles.push(firstHandle);
+    await firstHandle.kill();
+
+    // Continue with a setup_command that would leave a marker if run
+    const secondHandle = await startAgent({
+      repoPath: repo,
+      prompt: "should not be used",
+      baseBranch: "main",
+      config: {
+        ...testConfig,
+        defaults: { ...testConfig.defaults, setupCommand: "touch setup-marker" },
+      },
+      runtime: createSrtRuntime(),
+      continueSession: {
+        taskId: firstHandle.taskId,
+        worktreePath: firstHandle.worktreePath,
+        branch: firstHandle.branch,
+      },
+    });
+    handles.push(secondHandle);
+
+    const markerPath = join(secondHandle.worktreePath, "setup-marker");
+    expect(await Bun.file(markerPath).exists()).toBe(false);
+  });
+
+  test("startAgent reports setup status while running setup_command", async () => {
+    const repo = await createTestRepo();
+    repos.push(repo);
+
+    const statuses: AgentStatus[] = [];
+    const handle = await startAgent({
+      repoPath: repo,
+      prompt: "test",
+      baseBranch: "main",
+      config: {
+        ...testConfig,
+        defaults: { ...testConfig.defaults, setupCommand: "echo setup" },
+      },
+      runtime: createSrtRuntime(),
+      onStatus: (s) => statuses.push(s),
+    });
+    handles.push(handle);
+
+    const setupStatuses = statuses.filter(
+      (s) => s.phase === "setup" && "message" in s && s.message.toLowerCase().includes("setup"),
+    );
+    expect(setupStatuses.length).toBeGreaterThan(0);
   });
 
   test("startAgent with continueSession reuses existing worktree and taskId", async () => {
