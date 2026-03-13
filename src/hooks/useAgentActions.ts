@@ -332,6 +332,9 @@ export function useAgentActions({
     if (process.env.TMUX) {
       // Already inside tmux — switch-client is non-blocking; deer keeps running.
       const { spawnSync } = await import("node:child_process");
+      // Rebind prefix-d to switch-client -l so Ctrl+b d returns to the previous
+      // (deer) session instead of detaching from the tmux server entirely.
+      spawnSync("tmux", ["bind-key", "d", "switch-client", "-l"], { stdio: "inherit" });
       spawnSync("tmux", ["switch-client", "-t", sessionName], { stdio: "inherit" });
     } else {
       await withSuspendedTerminal(setSuspended, async () => {
@@ -373,6 +376,9 @@ export function useAgentActions({
 
     if (process.env.TMUX) {
       // Already inside tmux — switch-client is non-blocking; deer keeps running.
+      // Rebind prefix-d to switch-client -l so Ctrl+b d returns to the previous
+      // (deer) session instead of detaching from the tmux server entirely.
+      spawnSync("tmux", ["bind-key", "d", "switch-client", "-l"], { stdio: "inherit" });
       spawnSync("tmux", ["switch-client", "-t", sessionName], { stdio: "inherit" });
     } else {
       await withSuspendedTerminal(setSuspended, async () => {
