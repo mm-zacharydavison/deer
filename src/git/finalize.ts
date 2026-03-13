@@ -15,21 +15,25 @@ async function stageChanges(worktreePath: string): Promise<void> {
 
 /**
  * Commit staged/unstaged changes if any exist. No-op if the worktree is clean.
+ * @returns true if a commit was created, false if the worktree was clean.
  */
-async function commitIfNeeded(worktreePath: string, message: string): Promise<void> {
+async function commitIfNeeded(worktreePath: string, message: string): Promise<boolean> {
   const status = await Bun.$`git -C ${worktreePath} status --porcelain`.quiet();
   if (status.stdout.toString().trim().length > 0) {
     await Bun.$`git -C ${worktreePath} commit -m ${message}`.quiet();
+    return true;
   }
+  return false;
 }
 
 /**
  * Stage all changes and commit if there are uncommitted modifications.
  * No-op if the worktree is clean.
+ * @returns true if a commit was created, false if the worktree was clean.
  */
-async function stageAndCommit(worktreePath: string, message = "deer: uncommitted changes from agent session"): Promise<void> {
+async function stageAndCommit(worktreePath: string, message = "deer: uncommitted changes from agent session"): Promise<boolean> {
   await stageChanges(worktreePath);
-  await commitIfNeeded(worktreePath, message);
+  return commitIfNeeded(worktreePath, message);
 }
 
 /**
@@ -263,12 +267,13 @@ export async function createPullRequest(options: CreatePROptions): Promise<Creat
   const { repoPath, worktreePath, branch, baseBranch, prompt, onLog } = options;
   const log = onLog ?? (() => {});
 
-  // Stage changes first so they're visible in git status, then generate metadata
-  // and use the generated title as the commit message.
-  log(`[pr] Staging changes...`);
-  await stageChanges(worktreePath);
+  // Stage and commit all changes first so they're visible in the diff used for
+  // PR metadata generation. We commit with a temporary message, then amend with
+  // the real title once Claude generates the PR metadata.
+  log(`[pr] Staging and committing changes...`);
+  const hadUncommitted = await stageAndCommit(worktreePath, "deer: pending PR metadata");
 
-  // Generate PR metadata using Claude
+  // Generate PR metadata using Claude (diff now includes all committed changes)
   log(`[pr] Finding PR template...`);
   const prTemplate = await findPRTemplate(repoPath);
   log(`[pr] PR template: ${prTemplate ? "found" : "none"}`);
@@ -277,8 +282,11 @@ export async function createPullRequest(options: CreatePROptions): Promise<Creat
   const metadata = await generatePRMetadata(worktreePath, baseBranch, prompt, prTemplate, onLog);
   log(`[pr] Metadata: branch=${metadata.branchName} title=${metadata.title}`);
 
-  log(`[pr] Committing staged changes...`);
-  await commitIfNeeded(worktreePath, metadata.title);
+  // Amend the temporary commit with the real PR title (only if we created one)
+  if (hadUncommitted) {
+    log(`[pr] Updating commit message...`);
+    await Bun.$`git -C ${worktreePath} commit --amend -m ${metadata.title}`.quiet();
+  }
 
   // Rename the branch if Claude provided a name
   let finalBranch = branch;
@@ -347,10 +355,11 @@ export async function updatePullRequest(options: UpdatePROptions): Promise<void>
   // Remove deer internal files before staging
   await Bun.$`rm -rf ${worktreePath}/.deer-claude-config ${worktreePath}/.deer-prompt`.quiet().nothrow();
 
-  log(`[pr] Staging changes...`);
-  await stageChanges(worktreePath);
+  // Stage and commit changes so the diff used for metadata generation is complete.
+  log(`[pr] Staging and committing changes...`);
+  const hadUncommitted = await stageAndCommit(worktreePath, "deer: pending PR metadata");
 
-  // Regenerate PR metadata from the updated diff, then use the title as commit message
+  // Regenerate PR metadata from the updated diff
   log(`[pr] Finding PR template...`);
   const prTemplate = await findPRTemplate(repoPath);
   log(`[pr] PR template: ${prTemplate ? "found" : "none"}`);
@@ -359,8 +368,11 @@ export async function updatePullRequest(options: UpdatePROptions): Promise<void>
   const metadata = await generatePRMetadata(worktreePath, baseBranch, prompt, prTemplate, onLog);
   log(`[pr] Metadata: title=${metadata.title}`);
 
-  log(`[pr] Committing staged changes...`);
-  await commitIfNeeded(worktreePath, metadata.title);
+  // Amend the temporary commit with the real PR title (only if we created one)
+  if (hadUncommitted) {
+    log(`[pr] Updating commit message...`);
+    await Bun.$`git -C ${worktreePath} commit --amend -m ${metadata.title}`.quiet().nothrow();
+  }
 
   log(`[pr] Pushing branch ${finalBranch}...`);
   await pushBranch(worktreePath, finalBranch);
