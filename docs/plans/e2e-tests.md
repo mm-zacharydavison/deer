@@ -21,23 +21,24 @@ E2E tests close these gaps by running the actual `bun src/cli.tsx` binary and ve
 
 ## Approach
 
-### TUI capture via tmux
+### TUI capture via node-pty + @xterm/headless
 
-deer already uses tmux internally. The E2E tests piggyback on this: they spawn deer itself inside a named tmux session, then use `captureTmuxPane` (already in `src/sandbox/index.ts`) to read the rendered TUI.
+The test driver spawns deer in a real PTY using `node-pty`, and interprets the rendered output using `@xterm/headless` — the headless mode of xterm.js. This avoids tmux-in-tmux, which behaves differently from a real terminal and introduces session multiplexing quirks in the outer test driver.
 
 ```
 test process
-  └─ tmux new-session -s deer-e2e-test-NNN
+  └─ node-pty (real PTY)
        └─ bun src/cli.tsx   ← deer TUI renders here
-            └─ [user spawns a task]
-                 └─ tmux session: deer-<taskId>   ← Claude runs here
+            └─ @xterm/headless terminal buffer (VT100 interpreter)
+                 └─ [user spawns a task]
+                      └─ tmux session: deer-<taskId>   ← Claude runs here (unchanged)
 ```
 
 This means:
-- The TUI is a real Ink render inside a real terminal (tmux pane)
-- Keystrokes are sent via `tmux send-keys`
-- Output is captured via `tmux capture-pane -p`
-- No PTY emulation library needed — tmux handles it
+- The TUI is a real Ink render inside a real PTY
+- Keystrokes are written directly to the PTY (`pty.write(...)`)
+- Screen state is queried from `terminal.buffer.active` (row by row, like a DOM)
+- Inner agent tmux sessions are unaffected — deer still manages these exactly as in production
 
 ### Waiting for expected state
 
@@ -84,17 +85,19 @@ Create `test/e2e/helpers.ts` with shared utilities:
 
 ```typescript
 export async function startDeerSession(repoPath: string, extraEnv?: Record<string, string>): Promise<{
-  sessionName: string;
+  /** Write keystrokes to the PTY. */
+  sendKeys: (keys: string) => void;
+  /** Poll screen buffer until any row contains text, or throw on timeout. */
+  waitForPane: (text: string, timeoutMs?: number) => Promise<void>;
+  /** Current screen contents as an array of rows. */
+  getScreen: () => string[];
+  /** Kill the PTY process and clean up. */
   stop: () => Promise<void>;
 }>
 
-export async function waitForPane(sessionName: string, text: string, timeoutMs?: number): Promise<void>
-
-export async function sendKeys(sessionName: string, keys: string): Promise<void>
-
 export async function createTestRepo(): Promise<{ repoPath: string; cleanup: () => Promise<void> }>
 
-export async function withFakeClaude<T>(fn: (path: string) => Promise<T>): Promise<T>
+export async function withFakeClaude<T>(fn: (env: Record<string, string>) => Promise<T>): Promise<T>
 ```
 
 ---
@@ -108,16 +111,15 @@ export async function withFakeClaude<T>(fn: (path: string) => Promise<T>): Promi
 **Test: renders dashboard header in a git repo**
 ```
 1. createTestRepo()
-2. startDeerSession(repoPath) — spawns `bun src/cli.tsx` in tmux
-3. waitForPane(session, "deer") — any identifying header text
-4. sendKeys(session, "q") — quit
-5. waitFor(() => isTmuxSessionDead(session))
-6. Verify exit (no dangling session)
+2. const deer = await startDeerSession(repoPath)
+3. await deer.waitForPane("deer") — any identifying header text
+4. deer.sendKeys("q") — quit
+5. await deer.stop()
 ```
 
 **Test: exits with error when not in a git repo**
 ```
-1. Run `bun src/cli.tsx` in /tmp (not a git repo) as a subprocess (not in tmux)
+1. Run `bun src/cli.tsx` in /tmp (not a git repo) as a subprocess (no PTY needed)
 2. Capture stderr/stdout
 3. Expect process.exited !== 0
 4. Expect output contains "Error"
@@ -126,18 +128,17 @@ export async function withFakeClaude<T>(fn: (path: string) => Promise<T>): Promi
 **Test: preflight error shown in TUI when claude is missing**
 ```
 1. createTestRepo()
-2. Build a PATH that excludes claude
-3. startDeerSession(repoPath, { PATH: pathWithoutClaude })
-4. waitForPane(session, "claude CLI not available")
-5. Quit
+2. const deer = await startDeerSession(repoPath, { PATH: pathWithoutClaude })
+3. await deer.waitForPane("claude CLI not available")
+4. await deer.stop()
 ```
 
 **Test: preflight shows credential type**
 ```
 1. createTestRepo()
-2. startDeerSession(repoPath, { CLAUDE_CODE_OAUTH_TOKEN: "fake-token" })
-3. waitForPane(session, "subscription")  — or whatever label is shown
-4. Quit
+2. const deer = await startDeerSession(repoPath, { CLAUDE_CODE_OAUTH_TOKEN: "fake-token" })
+3. await deer.waitForPane("subscription")  — or whatever label is shown
+4. await deer.stop()
 ```
 
 ---
@@ -149,18 +150,19 @@ export async function withFakeClaude<T>(fn: (path: string) => Promise<T>): Promi
 **Test: submitting a prompt creates a worktree and tmux session**
 ```
 1. createTestRepo()
-2. withFakeClaude(async (claudePath) => {
-3.   startDeerSession(repoPath, { PATH: claudePath + ":" + process.env.PATH })
-4.   waitForPane(session, "deer")  — TUI is up
-5.   sendKeys(session, "fix the bug<Enter>")
-6.   waitFor(() => Bun.file(join(dataDir(), "tasks", ???, "state.json")).exists())
-7.     — hard: we don't know the taskId yet. Solution: scan dataDir/tasks/ for new dirs
+2. withFakeClaude(async (env) => {
+3.   const deer = await startDeerSession(repoPath, env)
+4.   await deer.waitForPane("deer")  — TUI is up
+5.   deer.sendKeys("fix the bug\r")
+6.   const taskId = await waitForNewTaskDir(Date.now())
+7.     — scan dataDir/tasks/ for new dirs since test started
 8.   Verify state.json has status: "running"
 9.   Verify tmux session deer-<taskId> exists (isTmuxSessionDead returns false)
 10.  waitFor(() => isTmuxSessionDead(`deer-${taskId}`))  — fake claude finishes
 11.  waitFor(() => loadHistory(repoPath) has an entry for this prompt)
 12.  Verify history entry status is not "running" (completed, cancelled, or failed)
-13. })
+13.  await deer.stop()
+14. })
 ```
 
 **Test: state.json is removed after agent completes**
@@ -193,36 +195,39 @@ async function waitForNewTaskId(since: number): Promise<string> {
 
 **Test: 'x' kills a running agent**
 ```
-1. Start deer, submit a long-running fake claude (sleep 60 stub)
+1. const deer = await startDeerSession(repoPath, env)  — long-running fake claude (sleep 60)
 2. Wait for agent tmux session to appear
 3. The running task should be selected by default
-4. sendKeys(deer-session, "x")   — kill action
-5. waitForPane(deer-session, "Cancel")  — confirmation prompt appears
-6. sendKeys(deer-session, "y") or Enter  — confirm
+4. deer.sendKeys("x")   — kill action
+5. await deer.waitForPane("Cancel")  — confirmation prompt appears
+6. deer.sendKeys("y")  — confirm
 7. waitFor(() => isTmuxSessionDead(`deer-<taskId>`))
-8. waitForPane(deer-session, "cancelled")
+8. await deer.waitForPane("cancelled")
 9. Verify history has status: "cancelled"
+10. await deer.stop()
 ```
 
 **Test: Backspace/Delete removes a completed task**
 ```
-1. Start deer, submit fast fake claude
+1. const deer = await startDeerSession(repoPath, env)  — fast fake claude
 2. Wait for agent to complete
-3. sendKeys(deer-session, Backspace)
+3. deer.sendKeys("\x7f")  — Backspace
 4. waitFor(() => !Bun.file(join(dataDir(), "tasks", taskId, "state.json")).exists())
 5. Verify JSONL history no longer has this taskId
 6. Verify worktree directory is gone
-7. Verify the task is no longer shown in the TUI pane
+7. Verify deer.getScreen() no longer contains the taskId
+8. await deer.stop()
 ```
 
 **Test: 'r' retries a completed task using --continue**
 ```
-1. Start deer, submit fast fake claude (records worktreePath)
+1. const deer = await startDeerSession(repoPath, env)  — fast fake claude
 2. Wait for completion
-3. sendKeys(deer-session, "r")  — retry
+3. deer.sendKeys("r")  — retry
 4. waitFor(() => new tmux session for same taskId exists)
 5. Verify session name is deer-<same taskId>
 6. Verify worktree path is same as before (--continue reuses it)
+7. await deer.stop()
 ```
 
 ---
@@ -234,20 +239,21 @@ async function waitForNewTaskId(since: number): Promise<string> {
 **Test: task from another instance appears as running**
 ```
 1. createTestRepo()
-2. Start deer instance A in tmux session A
+2. const deer = await startDeerSession(repoPath)
 3. Directly write a state.json into dataDir/tasks/<fakeTaskId>/state.json
    with ownerPid = process.pid (so isOwnerAlive returns true)
    and status = "running"
-4. waitFor(() => captureTmuxPane(sessionA) includes fakeTaskId's prompt)
-5. Verify TUI shows the task as "running"
+4. await deer.waitForPane(fakeTaskId's prompt)
+5. Verify deer.getScreen() shows the task as "running"
+6. await deer.stop()
 ```
 
 **Test: task becomes interrupted when owning process dies**
 ```
-1. (continuing from above, or new setup)
+1. const deer = await startDeerSession(repoPath)
 2. Write state.json with ownerPid = a PID that doesn't exist (e.g. 99999999)
-3. waitForPane(sessionA, "interrupted")  — or task disappears
-4. Alternatively verify via syncWithHistory logic directly (without TUI)
+3. await deer.waitForPane("interrupted")  — or task disappears
+4. await deer.stop()
 ```
 
 **Implementation note:** The multi-instance sync is driven by `fs.watch` + a safety poll (every 10s, `TASK_SYNC_SAFETY_POLL_MS`). Tests should write the state file and then wait up to ~15s for the sync to fire. The test can alternatively trigger the watch event by writing to the watched directory.
@@ -331,10 +337,10 @@ Cleanup: removeTaskState + removeFromHistory
 **Test: binary produces no startup crash in a git repo**
 ```
 1. createTestRepo()
-2. Spawn binary in a tmux session
-3. Wait 2s (startup time)
-4. Verify tmux session is still alive (binary didn't crash immediately)
-5. Send quit key
+2. const deer = await startDeerSession(repoPath)  — using the binary, not bun src/cli.tsx
+3. await deer.waitForPane("deer")  — TUI rendered without crash
+4. deer.sendKeys("q")
+5. await deer.stop()
 ```
 
 **Note:** This test should only run when `dist/` exists. Skip with `test.skip` when no binary is present, or gate on `DEER_BINARY_PATH` env var.
@@ -342,6 +348,14 @@ Cleanup: removeTaskState + removeFromHistory
 ---
 
 ## Infrastructure Needed
+
+### Dev dependencies
+
+```sh
+bun add -d node-pty @xterm/headless
+```
+
+`node-pty` is a native addon — it requires build tools (`python3`, `make`, a C++ compiler) at install time. These are standard in most CI environments. The compiled `.node` file is placed in `node_modules/node-pty/build/`.
 
 ### `test/fixtures/fake-claude.sh`
 
@@ -364,13 +378,14 @@ Make executable (`chmod +x`) and reference from `withFakeClaude`.
 Key utilities:
 
 ```typescript
-import { mkdtemp, rm, mkdir, readdir, stat } from "node:fs/promises";
+import * as pty from "node-pty";
+import { Terminal } from "@xterm/headless";
+import { mkdtemp, rm, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { captureTmuxPane, isTmuxSessionDead } from "../../src/sandbox/index";
 import { dataDir } from "../../src/task";
 
-/** Poll until condition() returns true, or throw on timeout */
+/** Poll until condition() returns truthy, or throw on timeout. */
 export async function waitFor(
   condition: () => Promise<boolean | string | null | undefined>,
   { timeout = 15_000, interval = 250, label = "condition" }: {
@@ -387,29 +402,56 @@ export async function waitFor(
   throw new Error(`waitFor("${label}") timed out after ${timeout}ms`);
 }
 
-/** Poll tmux pane until it contains expected text */
-export async function waitForPane(
-  sessionName: string,
-  text: string,
-  timeoutMs = 15_000,
-): Promise<void> {
-  await waitFor(
-    async () => {
-      const lines = await captureTmuxPane(sessionName, true);
-      return lines?.some(l => l.includes(text)) ?? false;
+/** Spawn deer TUI in a PTY. Returns controls for the session. */
+export async function startDeerSession(
+  repoPath: string,
+  extraEnv: Record<string, string> = {},
+): Promise<{
+  sendKeys: (keys: string) => void;
+  waitForPane: (text: string, timeoutMs?: number) => Promise<void>;
+  getScreen: () => string[];
+  stop: () => Promise<void>;
+}> {
+  const cols = 120;
+  const rows = 40;
+  const term = new Terminal({ cols, rows, allowProposedApi: true });
+
+  const proc = pty.spawn("bun", ["run", join(import.meta.dir, "../../src/cli.tsx")], {
+    name: "xterm-256color",
+    cols,
+    rows,
+    cwd: repoPath,
+    env: { ...process.env, ...extraEnv } as Record<string, string>,
+  });
+
+  proc.onData(data => term.write(data));
+
+  function getScreen(): string[] {
+    const lines: string[] = [];
+    for (let i = 0; i < rows; i++) {
+      lines.push(term.buffer.active.getLine(i)?.translateToString(true) ?? "");
+    }
+    return lines;
+  }
+
+  return {
+    sendKeys: (keys: string) => proc.write(keys),
+
+    waitForPane: (text: string, timeoutMs = 15_000) =>
+      waitFor(
+        async () => getScreen().some(l => l.includes(text)),
+        { timeout: timeoutMs, label: `pane contains "${text}"` },
+      ),
+
+    getScreen,
+
+    stop: async () => {
+      proc.kill();
     },
-    { timeout: timeoutMs, label: `pane contains "${text}"` },
-  );
+  };
 }
 
-/** Send keys to a tmux session */
-export async function sendKeys(sessionName: string, keys: string): Promise<void> {
-  await Bun.spawn(["tmux", "send-keys", "-t", sessionName, keys, ""], {
-    stdout: "pipe", stderr: "pipe",
-  }).exited;
-}
-
-/** Create a minimal git repo suitable for E2E tests */
+/** Create a minimal git repo suitable for E2E tests. */
 export async function createTestRepo(): Promise<{
   repoPath: string;
   cleanup: () => Promise<void>;
@@ -427,11 +469,10 @@ export async function createTestRepo(): Promise<{
   };
 }
 
-/** Run a test with a fake claude binary prepended to PATH */
+/** Run a test with a fake claude binary prepended to PATH. */
 export async function withFakeClaude<T>(fn: (env: Record<string, string>) => Promise<T>): Promise<T> {
   const binDir = await mkdtemp(join(tmpdir(), "deer-e2e-bin-"));
   const fakeBin = join(binDir, "claude");
-  // Copy the fixture stub
   const stubSrc = join(import.meta.dir, "../fixtures/fake-claude.sh");
   await Bun.$`cp ${stubSrc} ${fakeBin} && chmod +x ${fakeBin}`.quiet();
   try {
@@ -441,37 +482,7 @@ export async function withFakeClaude<T>(fn: (env: Record<string, string>) => Pro
   }
 }
 
-/** Spawn deer TUI in a tmux session. Returns session name and a stop() function. */
-export async function startDeerSession(
-  repoPath: string,
-  extraEnv: Record<string, string> = {},
-): Promise<{ sessionName: string; stop: () => Promise<void> }> {
-  const sessionName = `deer-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const cliPath = join(import.meta.dir, "../../src/cli.tsx");
-
-  const envArgs = Object.entries({ ...process.env, ...extraEnv })
-    .filter(([, v]) => v !== undefined)
-    .map(([k, v]) => `${k}=${v}`)
-    .join(" ");
-
-  await Bun.spawn([
-    "tmux", "new-session", "-d", "-s", sessionName,
-    "-c", repoPath,
-    "env", ...Object.entries({ ...process.env, ...extraEnv }).map(([k, v]) => `${k}=${v!}`),
-    "bun", "run", cliPath,
-  ], { stdout: "pipe", stderr: "pipe" }).exited;
-
-  return {
-    sessionName,
-    stop: async () => {
-      await Bun.spawn(["tmux", "kill-session", "-t", sessionName], {
-        stdout: "pipe", stderr: "pipe",
-      }).exited.catch(() => {});
-    },
-  };
-}
-
-/** Scan dataDir/tasks/ for a taskId dir created after a given timestamp */
+/** Scan dataDir/tasks/ for a taskId dir created after a given timestamp. */
 export async function waitForNewTaskDir(since: number, timeoutMs = 15_000): Promise<string> {
   const tasksDir = join(dataDir(), "tasks");
   let found: string | undefined;

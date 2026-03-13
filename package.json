@@ -28,8 +28,10 @@
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
+    "@xterm/headless": "^6.0.0",
     "bun-types": "latest",
-    "typescript": "^5.9.3",
-    "oxlint": "latest"
+    "node-pty": "^1.1.0",
+    "oxlint": "latest",
+    "typescript": "^5.9.3"
   }
 }
