@@ -151,6 +151,56 @@ describe("auth-proxy (Unix socket MITM)", () => {
     expect(proxy.socketPath).toBe(socketPath);
   });
 
+  test("allowedPaths blocks disallowed paths with 403", async () => {
+    const dir = await makeTmpDir();
+    const mock = await startMockUpstream();
+    const socketPath = join(dir, "auth.sock");
+
+    const proxy = await startAuthProxy(socketPath, [
+      {
+        domain: "api.example.com",
+        target: `http://127.0.0.1:${mock.port}`,
+        headers: { authorization: "Bearer token" },
+        allowedPaths: ["^/repos/"],
+      },
+    ]);
+    cleanups.push(() => proxy.close());
+
+    const allowed = await proxyRequest(socketPath, "http://api.example.com/repos/owner/repo/pulls");
+    expect(allowed.status).toBe(200);
+
+    const blocked = await proxyRequest(socketPath, "http://api.example.com/user");
+    expect(blocked.status).toBe(403);
+
+    const blockedRoot = await proxyRequest(socketPath, "http://api.example.com/orgs/something");
+    expect(blockedRoot.status).toBe(403);
+  });
+
+  test("allowedPaths allows matching suffix patterns", async () => {
+    const dir = await makeTmpDir();
+    const mock = await startMockUpstream();
+    const socketPath = join(dir, "auth.sock");
+
+    const proxy = await startAuthProxy(socketPath, [
+      {
+        domain: "github.com",
+        target: `http://127.0.0.1:${mock.port}`,
+        headers: { authorization: "Bearer token" },
+        allowedPaths: ["\\.git/(info/refs|git-receive-pack)$"],
+      },
+    ]);
+    cleanups.push(() => proxy.close());
+
+    const push = await proxyRequest(socketPath, "http://github.com/owner/repo.git/git-receive-pack");
+    expect(push.status).toBe(200);
+
+    const refs = await proxyRequest(socketPath, "http://github.com/owner/repo.git/info/refs");
+    expect(refs.status).toBe(200);
+
+    const blocked = await proxyRequest(socketPath, "http://github.com/owner/repo");
+    expect(blocked.status).toBe(403);
+  });
+
   test("close() removes socket file", async () => {
     const dir = await makeTmpDir();
     const socketPath = join(dir, "auth.sock");

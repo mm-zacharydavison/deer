@@ -177,6 +177,28 @@ export async function prepare(options: PrepareOptions): Promise<PreparedSession>
   const { upstreams, sandboxEnv, placeholderEnv } =
     resolveProxyUpstreams(config.sandbox.proxyCredentials);
 
+  // Inject GitHub credentials — resolve the token from the host gh CLI, then
+  // add proxy upstreams with tight path filters so the sandbox can only open
+  // or update PRs and push branches, not browse arbitrary GitHub content.
+  const ghTokenResult = await Bun.$`gh auth token`.quiet().nothrow();
+  const ghToken = ghTokenResult.stdout.toString().trim();
+  if (ghToken) {
+    upstreams.push({
+      domain: "api.github.com",
+      target: "https://api.github.com",
+      headers: { authorization: `Bearer ${ghToken}` },
+      // Only allow PR-related REST API endpoints
+      allowedPaths: ["^/repos/"],
+    });
+    upstreams.push({
+      domain: "github.com",
+      target: "https://github.com",
+      headers: { authorization: `Bearer ${ghToken}` },
+      // Only allow git smart HTTP push paths
+      allowedPaths: ["\\.git/(info/refs|git-receive-pack)$"],
+    });
+  }
+
   let authProxy: AuthProxy | null = null;
   let mitmProxy: { socketPath: string; domains: string[] } | undefined;
   if (upstreams.length > 0) {

@@ -23,6 +23,14 @@ export interface ProxyUpstream {
   target: string;
   /** Headers to inject into every proxied request */
   headers: Record<string, string>;
+  /**
+   * Regex patterns matched against the request path (without query string).
+   * If set, only paths matching at least one pattern are proxied; others get 403.
+   * If omitted or empty, all paths are allowed.
+   * @example ["^/repos/"] — only allow paths starting with /repos/
+   * @example ["\\.git/(info/refs|git-receive-pack)$"] — only git push paths
+   */
+  allowedPaths?: string[];
 }
 
 export interface AuthProxy {
@@ -43,10 +51,8 @@ function ensureServerScript(): string {
   const dataDir = join(process.env.HOME ?? "/root", ".local", "share", "deer");
   const scriptPath = join(dataDir, "auth-proxy-server.mjs");
 
-  if (!existsSync(scriptPath)) {
-    mkdirSync(dataDir, { recursive: true });
-    writeFileSync(scriptPath, authProxySource, "utf-8");
-  }
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(scriptPath, authProxySource, "utf-8");
 
   return scriptPath;
 }

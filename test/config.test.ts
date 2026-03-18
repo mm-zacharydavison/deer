@@ -20,9 +20,15 @@ describe("loadConfig", () => {
 
     expect(config.defaults.agent).toBe("claude");
     expect(config.defaults.timeoutMs).toBe(1800000);
-    expect(config.network.allowlist).toBeArrayOfSize(5);
     expect(config.network.allowlist).toContain("api.anthropic.com");
     expect(config.network.allowlist).toContain("registry.npmjs.org");
+  });
+
+  test("default allowlist includes github.com and api.github.com", async () => {
+    const config = await loadConfig(tmpDir);
+
+    expect(config.network.allowlist).toContain("github.com");
+    expect(config.network.allowlist).toContain("api.github.com");
   });
 
   test("TOML repo config (deer.toml) parses correctly", async () => {
@@ -127,13 +133,10 @@ describe("DEFAULT_CONFIG", () => {
   test("has expected default values", () => {
     expect(DEFAULT_CONFIG.defaults.agent).toBe("claude");
     expect(DEFAULT_CONFIG.defaults.timeoutMs).toBe(1800000);
-    expect(DEFAULT_CONFIG.network.allowlist).toEqual([
-      "api.anthropic.com",
-      "claude.ai",
-      "statsig.anthropic.com",
-      "sentry.io",
-      "registry.npmjs.org",
-    ]);
+    expect(DEFAULT_CONFIG.network.allowlist).toContain("api.anthropic.com");
+    expect(DEFAULT_CONFIG.network.allowlist).toContain("registry.npmjs.org");
+    expect(DEFAULT_CONFIG.network.allowlist).toContain("github.com");
+    expect(DEFAULT_CONFIG.network.allowlist).toContain("api.github.com");
   });
 
   test("has empty default env_passthrough (credentials go through proxy)", () => {

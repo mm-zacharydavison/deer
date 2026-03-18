@@ -93,6 +93,8 @@ export const DEFAULT_CONFIG: DeerConfig = {
       "statsig.anthropic.com",
       "sentry.io",
       "registry.npmjs.org",
+      "github.com",
+      "api.github.com",
     ],
   },
   sandbox: {

@@ -94,6 +94,16 @@ function handleRequest(req, res) {
     return;
   }
 
+  if (upstream.allowedPaths?.length) {
+    const allowed = upstream.allowedPaths.some((pattern) => new RegExp(pattern).test(parsedUrl.pathname));
+    if (!allowed) {
+      log(`[proxy] 403 blocked path ${req.method ?? "GET"} ${upstream.domain}${parsedUrl.pathname}`);
+      res.writeHead(403, { "content-type": "text/plain" });
+      res.end("auth-proxy: path not allowed");
+      return;
+    }
+  }
+
   const path = parsedUrl.pathname + parsedUrl.search;
   forwardToUpstream(upstream, path, req, res);
 }
