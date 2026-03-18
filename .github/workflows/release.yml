@@ -29,10 +29,14 @@ jobs:
       - name: Build binaries
         run: |
           mkdir -p dist
-          bun build --compile --target=bun-linux-x64   src/cli.tsx --outfile dist/deer-linux-x64
-          bun build --compile --target=bun-linux-arm64  src/cli.tsx --outfile dist/deer-linux-arm64
-          bun build --compile --target=bun-darwin-x64  src/cli.tsx --outfile dist/deer-darwin-x64
-          bun build --compile --target=bun-darwin-arm64 src/cli.tsx --outfile dist/deer-darwin-arm64
+          bun build --compile --target=bun-linux-x64    src/cli.tsx    --outfile dist/deer-linux-x64
+          bun build --compile --target=bun-linux-arm64  src/cli.tsx    --outfile dist/deer-linux-arm64
+          bun build --compile --target=bun-darwin-x64   src/cli.tsx    --outfile dist/deer-darwin-x64
+          bun build --compile --target=bun-darwin-arm64 src/cli.tsx    --outfile dist/deer-darwin-arm64
+          bun build --compile --target=bun-linux-x64    src/deerbox.ts --outfile dist/deerbox-linux-x64
+          bun build --compile --target=bun-linux-arm64  src/deerbox.ts --outfile dist/deerbox-linux-arm64
+          bun build --compile --target=bun-darwin-x64   src/deerbox.ts --outfile dist/deerbox-darwin-x64
+          bun build --compile --target=bun-darwin-arm64 src/deerbox.ts --outfile dist/deerbox-darwin-arm64
 
       - name: Verify binaries
         run: ls -lh dist/
@@ -40,6 +44,6 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/deer-*
+          files: dist/*
           generate_release_notes: true
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}

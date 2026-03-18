@@ -4,7 +4,8 @@
   "description": "Unattended coding agent.",
   "type": "module",
   "bin": {
-    "deer": "scripts/install.js"
+    "deer": "scripts/install.js",
+    "deerbox": "scripts/install.js"
   },
   "files": [
     "scripts/install.js"
@@ -16,6 +17,7 @@
     "test": "bun test",
     "lint": "oxlint src",
     "dev": "bun run src/cli.tsx",
+    "dev:deerbox": "bun run src/deerbox.ts",
     "build": "bun run scripts/build.ts"
   },
   "dependencies": {

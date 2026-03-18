@@ -8,3 +8,4 @@ const outfile = `dist/deer-${os}-${arch}`;
 
 await $`mkdir -p dist`;
 await $`bun build --compile --target=${target} src/cli.tsx --outfile ${outfile}`;
+await $`bun build --compile --target=${target} src/deerbox.ts --outfile dist/deerbox-${os}-${arch}`;

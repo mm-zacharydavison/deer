@@ -26,6 +26,28 @@ const ARCH_MAP = {
   arm64: "arm64",
 };
 
+async function downloadBinary(name, os, cpuArch, installDir) {
+  const binaryName = `${name}-${os}-${cpuArch}`;
+  const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${binaryName}`;
+  const installPath = join(installDir, name);
+
+  console.log(`Downloading ${name} v${VERSION} for ${os}/${cpuArch}...`);
+  console.log(`From: ${url}`);
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `Download failed: ${response.status} ${response.statusText}\nURL: ${url}`
+    );
+  }
+
+  const buffer = await response.arrayBuffer();
+  await writeFile(installPath, Buffer.from(buffer));
+  await chmod(installPath, 0o755);
+
+  console.log(`Installed to: ${installPath}`);
+}
+
 async function install() {
   const os = PLATFORM_MAP[platform()];
   const cpuArch = ARCH_MAP[arch()];
@@ -41,28 +63,12 @@ async function install() {
     );
   }
 
-  const binaryName = `deer-${os}-${cpuArch}`;
-  const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${binaryName}`;
   const installDir = join(homedir(), ".local", "bin");
-  const installPath = join(installDir, "deer");
-
-  console.log(`Downloading deer v${VERSION} for ${os}/${cpuArch}...`);
-  console.log(`From: ${url}`);
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(
-      `Download failed: ${response.status} ${response.statusText}\nURL: ${url}`
-    );
-  }
-
   await mkdir(installDir, { recursive: true });
 
-  const buffer = await response.arrayBuffer();
-  await writeFile(installPath, Buffer.from(buffer));
-  await chmod(installPath, 0o755);
-
-  console.log(`\nInstalled to: ${installPath}`);
+  await downloadBinary("deer", os, cpuArch, installDir);
+  await downloadBinary("deerbox", os, cpuArch, installDir);
+  console.log("");
 
   // Install sandbox runtime to deer's data directory
   const deerDataDir = join(homedir(), ".local", "share", "deer");

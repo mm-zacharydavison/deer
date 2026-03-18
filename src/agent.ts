@@ -45,8 +45,11 @@ export interface ContinueSession {
 export interface AgentRunOptions {
   /** Path to the repository root */
   repoPath: string;
-  /** The user's prompt / task description */
-  prompt: string;
+  /**
+   * The user's prompt / task description.
+   * If omitted, Claude starts in interactive mode with no initial message.
+   */
+  prompt?: string;
   /** Branch to base the worktree on */
   baseBranch: string;
   /** Loaded deer config (for network allowlist, env, etc.) */
@@ -151,7 +154,7 @@ export function resolveProxyUpstreams(
  * Poll the tmux pane for the bypass permissions confirmation dialog
  * and dismiss it by selecting "Yes, I accept".
  */
-async function dismissBypassDialog(sessionName: string): Promise<void> {
+export async function dismissBypassDialog(sessionName: string): Promise<void> {
   for (let i = 0; i < BYPASS_DIALOG_MAX_POLLS; i++) {
     await Bun.sleep(BYPASS_DIALOG_POLL_MS);
     const pane = await captureTmuxPane(sessionName);
@@ -292,9 +295,12 @@ export async function startAgent(options: AgentRunOptions): Promise<AgentHandle>
   // Build the Claude command — interactive mode (no -p) so users can
   // attach to the tmux session and observe/intervene.
   // When continuing, use --continue to resume the previous conversation.
+  // When no prompt is given, Claude starts in interactive mode.
   const claudeCmd = continueSession
     ? ["claude", "--dangerously-skip-permissions", "--model", model, "--continue"]
-    : ["claude", "--dangerously-skip-permissions", "--model", model, prompt];
+    : prompt
+      ? ["claude", "--dangerously-skip-permissions", "--model", model, prompt]
+      : ["claude", "--dangerously-skip-permissions", "--model", model];
 
   // Merge passthrough env (non-secret vars), proxy base URLs, and placeholder
   // env vars. Placeholders make the sandboxed tool enter the right auth mode
