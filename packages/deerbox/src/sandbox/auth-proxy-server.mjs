@@ -8,9 +8,12 @@
  * Usage: node auth-proxy-server.mjs <socketPath> <upstreamsJSON>
  */
 
-import { createServer, request as httpRequest } from "node:http";
-import { request as httpsRequest } from "node:https";
+import { createServer, request as httpRequest, Agent as HttpAgent } from "node:http";
+import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
 import { unlinkSync } from "node:fs";
+
+const httpsAgent = new HttpsAgent({ keepAlive: true });
+const httpAgent = new HttpAgent({ keepAlive: true });
 
 const socketPath = process.argv[2];
 const upstreams = JSON.parse(process.argv[3]);
@@ -43,6 +46,7 @@ function forwardToUpstream(upstream, path, req, res) {
       path: targetUrl.pathname + targetUrl.search,
       method,
       headers: fwdHeaders,
+      agent: isHttps ? httpsAgent : httpAgent,
     },
     (proxyRes) => {
       const elapsed = Date.now() - startTime;
