@@ -1,4 +1,4 @@
-# 🦌 deer
+# 🦌 deer / deerbox
 
 `deer` is what I consider the simplest tool for running multiple unattended `claude` instances safely.
 
@@ -65,6 +65,16 @@ Subscriptions are prioritized over API keys, so if you have both setup, `deer` w
 cd your-project
 deer
 ```
+
+If you just want the sandboxing part of `deer`, without the TUI, you can use `deerbox`:
+```sh
+cd your-project
+deerbox
+```
+
+Note that when you exit a `deerbox` instance, by default its worktree will be cleaned up, so you should ask `claude` itself to open a PR from within the `deerbox` instance.
+
+---
 
 ### Dashboard
 

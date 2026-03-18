@@ -1,18 +1,18 @@
 /**
- * Tests that srt-settings.json allows writes to the worktree's gitdir,
- * which lives inside the main repo's .git/worktrees/<name>/ directory.
+ * Tests that srt-settings.json allows writes to the repo's .git directory,
+ * which is needed for git operations in worktrees.
  *
- * Git worktrees store their metadata (index, HEAD, etc.) in the main repo's
- * .git/worktrees/<name>/ — not inside the worktree itself. The sandbox must
- * allow writes there so git operations (add, commit) succeed.
+ * Git worktrees share objects, refs, and packed-refs with the main repo.
+ * The sandbox must allow writes to the entire .git/ directory so git add
+ * (objects), commit (refs), and worktree metadata operations all succeed.
  */
 import { test, expect, describe, afterEach } from "bun:test";
 import { createSrtRuntime } from "../../packages/deerbox/src/index";
-import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-describe("srt settings - worktree gitdir write permission", () => {
+describe("srt settings - repo .git write permission", () => {
   const tmpDirs: string[] = [];
 
   afterEach(async () => {
@@ -27,16 +27,11 @@ describe("srt settings - worktree gitdir write permission", () => {
     return d;
   }
 
-  test("worktree gitdir is included in allowWrite when .git file is present", async () => {
-    // Simulate the main repo's .git directory
+  test("repoGitDir is included in allowWrite when provided", async () => {
     const repoGitDir = await makeTmpDir();
-    // Git creates .git/worktrees/<name>/ to store worktree-specific metadata
-    const worktreeGitDir = join(repoGitDir, "worktrees", "task1");
-    await mkdir(worktreeGitDir, { recursive: true });
+    await mkdir(join(repoGitDir, "objects"), { recursive: true });
 
-    // The worktree directory has a .git FILE (not dir) pointing to the gitdir
     const worktreeDir = await makeTmpDir();
-    await writeFile(join(worktreeDir, ".git"), `gitdir: ${worktreeGitDir}\n`);
 
     const runtime = createSrtRuntime();
     await runtime.prepare?.({
@@ -49,11 +44,10 @@ describe("srt settings - worktree gitdir write permission", () => {
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
     const allowWrite: string[] = settings.filesystem.allowWrite;
 
-    expect(allowWrite).toContain(worktreeGitDir);
+    expect(allowWrite).toContain(repoGitDir);
   });
 
-  test("allowWrite does not include non-existent gitdir when .git file is absent", async () => {
-    // A plain worktree dir with no .git file (e.g., the main worktree itself)
+  test("allowWrite has no repoGitDir when it is not provided", async () => {
     const worktreeDir = await makeTmpDir();
 
     const runtime = createSrtRuntime();
@@ -66,9 +60,8 @@ describe("srt settings - worktree gitdir write permission", () => {
     const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
     const allowWrite: string[] = settings.filesystem.allowWrite;
 
-    // No extra paths added beyond the defaults
     expect(allowWrite).toContain(worktreeDir);
-    // No path from a missing .git file should sneak in
+    // No extra paths beyond defaults
     const extraPaths = allowWrite.filter(
       (p) =>
         p !== worktreeDir &&
