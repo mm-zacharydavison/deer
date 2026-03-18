@@ -2,7 +2,7 @@ import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm, mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
-import { ensureDeerEmojiPrefix, findPRTemplate } from "../src/git/finalize";
+import { ensureDeerEmojiPrefix, findPRTemplate, parsePRMetadataResponse, buildClaudeSubprocessEnv } from "../src/git/finalize";
 
 describe("ensureDeerEmojiPrefix", () => {
   test("adds deer emoji to plain title", () => {
@@ -72,5 +72,99 @@ describe("findPRTemplate", () => {
     await writeFile(join(tmpDir, ".github", "PULL_REQUEST_TEMPLATE.md"), "## Primary\n");
     await writeFile(join(tmpDir, "docs", "pull_request_template.md"), "## Secondary\n");
     expect(await findPRTemplate(tmpDir)).toBe("## Primary\n");
+  });
+});
+
+describe("parsePRMetadataResponse", () => {
+  test("parses valid claude --output-format json wrapper", () => {
+    const rawOutput = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: JSON.stringify({ branchName: "fix-login", title: "Fix login", body: "## Summary\nFix" }),
+    });
+    const parsed = parsePRMetadataResponse(rawOutput);
+    expect(parsed.branchName).toBe("fix-login");
+    expect(parsed.title).toBe("Fix login");
+    expect(parsed.body).toBe("## Summary\nFix");
+  });
+
+  test("parses unwrapped JSON (fallback when not wrapped)", () => {
+    const rawOutput = JSON.stringify({ branchName: "add-search", title: "Add search", body: "## Summary\nAdded" });
+    const parsed = parsePRMetadataResponse(rawOutput);
+    expect(parsed.branchName).toBe("add-search");
+    expect(parsed.title).toBe("Add search");
+  });
+
+  test("parses multiline body correctly", () => {
+    const body = "## Task\n> Fix it\n\n## Summary\nFixed the issue\n\n## Changes\n- src/foo.ts\n\n---\n> Created by deer";
+    const rawOutput = JSON.stringify({
+      type: "result",
+      result: JSON.stringify({ branchName: "fix-it", title: "Fix it", body }),
+    });
+    const parsed = parsePRMetadataResponse(rawOutput);
+    expect(parsed.body).toBe(body);
+    expect(parsed.body.split("\n").length).toBeGreaterThan(3);
+  });
+
+  test("throws when no JSON object found", () => {
+    expect(() => parsePRMetadataResponse("not json at all")).toThrow("No JSON found");
+  });
+
+  test("throws when required fields are missing", () => {
+    const rawOutput = JSON.stringify({ type: "result", result: JSON.stringify({ branchName: "test" }) });
+    expect(() => parsePRMetadataResponse(rawOutput)).toThrow("Missing required fields");
+  });
+
+  test("throws when result field is empty string", () => {
+    const rawOutput = JSON.stringify({ type: "result", result: "" });
+    expect(() => parsePRMetadataResponse(rawOutput)).toThrow();
+  });
+});
+
+describe("buildClaudeSubprocessEnv", () => {
+  test("strips ANTHROPIC_BASE_URL (sandbox proxy URL)", () => {
+    const env = buildClaudeSubprocessEnv({ ANTHROPIC_BASE_URL: "http://api.anthropic.com", HOME: "/home/z" });
+    expect(env.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(env.HOME).toBe("/home/z");
+  });
+
+  test("strips CLAUDE_CODE_HOST_HTTP_PROXY_PORT", () => {
+    const env = buildClaudeSubprocessEnv({ CLAUDE_CODE_HOST_HTTP_PROXY_PORT: "43547", PATH: "/usr/bin" });
+    expect(env.CLAUDE_CODE_HOST_HTTP_PROXY_PORT).toBeUndefined();
+    expect(env.PATH).toBe("/usr/bin");
+  });
+
+  test("strips CLAUDE_CODE_HOST_SOCKS_PROXY_PORT", () => {
+    const env = buildClaudeSubprocessEnv({ CLAUDE_CODE_HOST_SOCKS_PROXY_PORT: "44589" });
+    expect(env.CLAUDE_CODE_HOST_SOCKS_PROXY_PORT).toBeUndefined();
+  });
+
+  test("strips CLAUDE_CODE_OAUTH_TOKEN when it is the proxy-managed placeholder", () => {
+    const env = buildClaudeSubprocessEnv({ CLAUDE_CODE_OAUTH_TOKEN: "proxy-managed" });
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  test("keeps CLAUDE_CODE_OAUTH_TOKEN when it is a real token", () => {
+    const env = buildClaudeSubprocessEnv({ CLAUDE_CODE_OAUTH_TOKEN: "real-token-abc123" });
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("real-token-abc123");
+  });
+
+  test("sets PWD to /tmp", () => {
+    const env = buildClaudeSubprocessEnv({ PWD: "/some/project" });
+    expect(env.PWD).toBe("/tmp");
+  });
+
+  test("preserves other env vars", () => {
+    const env = buildClaudeSubprocessEnv({ HOME: "/home/user", PATH: "/usr/bin", TERM: "xterm" });
+    expect(env.HOME).toBe("/home/user");
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.TERM).toBe("xterm");
+  });
+
+  test("excludes undefined values from process.env", () => {
+    const env = buildClaudeSubprocessEnv({ DEFINED: "yes", UNDEFINED: undefined } as Record<string, string | undefined>);
+    expect(env.DEFINED).toBe("yes");
+    expect("UNDEFINED" in env).toBe(false);
   });
 });

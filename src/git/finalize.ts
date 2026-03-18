@@ -5,6 +5,7 @@
 import { join } from "path";
 import { MAX_DIFF_FOR_PR_METADATA, PR_METADATA_MODEL } from "../constants";
 import { getPRLanguage } from "../i18n";
+import { resolveCredentials } from "../preflight";
 
 /**
  * Stage all changes without committing.
@@ -129,6 +130,61 @@ export function ensureDeerEmojiPrefix(title: string): string {
 }
 
 /**
+ * Build a clean subprocess environment for the claude metadata subprocess.
+ *
+ * Strips sandbox proxy vars that would route claude through the SRT MITM proxy
+ * (which only works inside the sandbox, not for host-level processes). Also
+ * removes the placeholder token so the subprocess falls back to real credentials.
+ *
+ * @param env - Source environment (typically process.env)
+ */
+export function buildClaudeSubprocessEnv(env: NodeJS.ProcessEnv | Record<string, string | undefined>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v !== undefined) result[k] = v;
+  }
+  // Strip SRT sandbox proxy routing vars — these point to the per-sandbox MITM proxy
+  // which is not accessible from the host process that runs this metadata generation.
+  delete result.ANTHROPIC_BASE_URL;
+  delete result.CLAUDE_CODE_HOST_HTTP_PROXY_PORT;
+  delete result.CLAUDE_CODE_HOST_SOCKS_PROXY_PORT;
+  // Strip the placeholder token — "proxy-managed" is not a real credential.
+  // resolveCredentials() will have set the real token in process.env before this runs.
+  if (result.CLAUDE_CODE_OAUTH_TOKEN === "proxy-managed") {
+    delete result.CLAUDE_CODE_OAUTH_TOKEN;
+  }
+  result.PWD = "/tmp";
+  return result;
+}
+
+/**
+ * Parse the raw JSON output from `claude -p --output-format json` into PR metadata fields.
+ * Handles both the wrapped format (outer JSON envelope with `result` field) and
+ * unwrapped format (direct JSON object).
+ *
+ * @throws if no JSON object is found or required fields are missing
+ */
+export function parsePRMetadataResponse(rawOutput: string): { branchName: string; title: string; body: string } {
+  const output = rawOutput.trim();
+  let text = output;
+  try {
+    const wrapper = JSON.parse(output);
+    if (wrapper.result) text = wrapper.result;
+  } catch {
+    // Not wrapped — use the raw output as-is
+  }
+
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error(`No JSON found in Claude response: ${text.slice(0, 200)}`);
+
+  const parsed = JSON.parse(jsonMatch[0]);
+  if (!parsed.branchName || !parsed.title || !parsed.body) {
+    throw new Error("Missing required fields in Claude response");
+  }
+  return { branchName: parsed.branchName, title: parsed.title, body: parsed.body };
+}
+
+/**
  * Ask Claude to generate PR metadata (branch name, title, body) from the diff.
  * Falls back to a simple prompt-based title if Claude fails.
  */
@@ -194,15 +250,24 @@ Diff:
 ${truncatedDiff}`;
 
   try {
-    const proc = Bun.spawn(["claude", "-p", metadataPrompt, "--model", PR_METADATA_MODEL, "--output-format", "json"], {
+    // Ensure real credentials are in process.env before spawning — reads from
+    // ~/.claude.json if CLAUDE_CODE_OAUTH_TOKEN is not already set in the environment.
+    await resolveCredentials();
+
+    // Build a clean env that strips sandbox proxy vars. When the deer TUI is launched
+    // from within a deer agent session (or any context where SRT sandbox env vars have
+    // been inherited), ANTHROPIC_BASE_URL points to the per-sandbox MITM proxy which is
+    // not accessible for this host-level subprocess. Stripping it ensures claude connects
+    // directly to the real Anthropic API.
+    const subprocessEnv = buildClaudeSubprocessEnv(process.env);
+
+    const proc = Bun.spawn(["claude", "-p", metadataPrompt, "--model", PR_METADATA_MODEL, "--output-format", "json", "--no-session-persistence"], {
       stdout: "pipe",
       stderr: "pipe",
       timeout: 60_000,
       // Run in /tmp so this doesn't pollute the user's project history in ~/.claude/projects/.
-      // Also explicitly set PWD so claude uses /tmp for its project path rather than inheriting
-      // the parent process's working directory.
       cwd: "/tmp",
-      env: { ...process.env, PWD: "/tmp" },
+      env: subprocessEnv,
     });
     // Read stdout and stderr concurrently with process exit — reading after proc.exited
     // can return empty in Bun because unread pipe data may be discarded on process exit.
@@ -211,25 +276,12 @@ ${truncatedDiff}`;
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
     ]);
-    if (exitCode !== 0) throw new Error(`claude exited ${exitCode}: ${stderrText.trim()}`);
-    const output = rawOutput.trim();
-
-    let text = output;
-    try {
-      const wrapper = JSON.parse(output);
-      if (wrapper.result) text = wrapper.result;
-    } catch {
-      // Not wrapped, use as-is
+    if (exitCode !== 0) {
+      const preview = rawOutput.trim().slice(0, 200);
+      throw new Error(`claude exited ${exitCode}: ${stderrText.trim()}${preview ? ` (stdout: ${preview})` : ""}`);
     }
 
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error(`No JSON found in Claude response: ${text.slice(0, 200)}`);
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (!parsed.branchName || !parsed.title || !parsed.body) {
-      throw new Error("Missing required fields in Claude response");
-    }
-
+    const parsed = parsePRMetadataResponse(rawOutput);
     return {
       branchName: parsed.branchName.replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, ""),
       title: ensureDeerEmojiPrefix(parsed.title.slice(0, 70)),
