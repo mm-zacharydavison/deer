@@ -178,7 +178,10 @@ export async function applyEcosystems(
 
           if (repoContent !== worktreeContent) continue;
 
-          await Bun.$`cp --reflink=auto -r ${repoSource} ${worktreeDest}`.quiet();
+          const cpCmd = process.platform === "darwin"
+            ? Bun.$`cp -cR ${repoSource} ${worktreeDest}`.quiet()
+            : Bun.$`cp --reflink=auto -r ${repoSource} ${worktreeDest}`.quiet();
+          await cpCmd;
         } catch (err) {
           process.stderr.write(`[deer] ecosystems: prepopulate ${strategy.source}: ${err}\n`);
         }
