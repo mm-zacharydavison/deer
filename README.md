@@ -70,7 +70,7 @@ If you just want the sandboxing part of `deer`, without the TUI, you can use `de
 
 ```sh
 cd your-project
-deerbox "fix the login bug"
+deerbox
 ```
 
 After Claude exits, `deerbox` prompts you to create a PR, update an existing one, open a shell in the worktree, or discard. By default the worktree is cleaned up when you're done.
