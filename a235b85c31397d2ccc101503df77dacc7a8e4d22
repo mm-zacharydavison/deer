@@ -1,0 +1,23 @@
+docs/plans/deerbox-privileged-daemon.md
+  5737661566f469fe 1-277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "a235b85c31397d2ccc101503df77dacc7a8e4d22",
+  "prompts": {
+    "5737661566f469fe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "514f0f05-d9e0-4d9a-b4d8-a74581ef6c0c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "deer-agent <deer@noreply>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 277,
+      "overriden_lines": 0
+    }
+  }
+}
