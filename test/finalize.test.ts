@@ -147,6 +147,31 @@ describe("parsePRMetadataResponse", () => {
   });
 });
 
+describe("CreatePROptions / UpdatePROptions prompt nullability", () => {
+  test("CreatePROptions accepts null prompt", () => {
+    const opts: import("deerbox").CreatePROptions = {
+      repoPath: "/repo",
+      worktreePath: "/repo/worktree",
+      branch: "deer/some-branch",
+      baseBranch: "main",
+      prompt: null,
+    };
+    expect(opts.prompt).toBeNull();
+  });
+
+  test("UpdatePROptions accepts null prompt", () => {
+    const opts: import("deerbox").UpdatePROptions = {
+      repoPath: "/repo",
+      worktreePath: "/repo/worktree",
+      finalBranch: "deer/some-branch",
+      baseBranch: "main",
+      prompt: null,
+      prUrl: "https://github.com/org/repo/pull/1",
+    };
+    expect(opts.prompt).toBeNull();
+  });
+});
+
 describe("buildClaudeSubprocessEnv", () => {
   test("strips ANTHROPIC_BASE_URL (sandbox proxy URL)", () => {
     const env = buildClaudeSubprocessEnv({ ANTHROPIC_BASE_URL: "http://api.anthropic.com", HOME: "/home/z" });

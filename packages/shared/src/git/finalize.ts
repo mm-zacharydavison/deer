@@ -90,7 +90,8 @@ export interface CreatePROptions {
   worktreePath: string;
   branch: string;
   baseBranch: string;
-  prompt: string;
+  /** The task prompt, or null if the session was started interactively without a prompt. */
+  prompt: string | null;
   /** Verbose log callback for diagnostics */
   onLog?: (message: string) => void;
 }
@@ -101,7 +102,8 @@ export interface UpdatePROptions {
   /** Already-finalized branch name, e.g. "deer/fix-login-bug" */
   finalBranch: string;
   baseBranch: string;
-  prompt: string;
+  /** The task prompt, or null if the session was started interactively without a prompt. */
+  prompt: string | null;
   /** @example "https://github.com/org/repo/pull/42" */
   prUrl: string;
   /** Verbose log callback for diagnostics */
@@ -246,7 +248,7 @@ function extractFirstJsonObject(text: string): string | null {
  * Ask Claude to generate PR metadata (branch name, title, body) from the diff.
  * Falls back to a simple prompt-based title if Claude fails.
  */
-async function generatePRMetadata(worktreePath: string, baseBranch: string, prompt: string, prTemplate: string | null, onLog?: (msg: string) => void): Promise<PRMetadata> {
+async function generatePRMetadata(worktreePath: string, baseBranch: string, prompt: string | null, prTemplate: string | null, onLog?: (msg: string) => void): Promise<PRMetadata> {
   // Fetch latest remote state so we compare against up-to-date origin
   await Bun.$`git -C ${worktreePath} fetch origin ${baseBranch}`.quiet().nothrow();
   const remoteBase = `origin/${baseBranch}`;
@@ -277,15 +279,21 @@ async function generatePRMetadata(worktreePath: string, baseBranch: string, prom
     : "";
 
   const bodyInstruction = prTemplate
-    ? "body: follow the PR template structure above, filling in each section based on what the commits and diff ACTUALLY show was done — not based on the task prompt alone. The task prompt tells you what was requested; the diff and commits tell you what was actually implemented. Start with a ## Task section containing the original task prompt as a blockquote. End with a horizontal rule and \"> Created by [deer](https://github.com/zdavison/deer) — review carefully.\""
-    : "body: markdown starting with a ## Task section containing the original task prompt as a blockquote, followed by a ## Summary section describing what changed and why, then a ## Changes section with bullet points of key changes. End with a horizontal rule and \"> Created by [deer](https://github.com/zdavison/deer) — review carefully.\"";
+    ? (prompt
+        ? "body: follow the PR template structure above, filling in each section based on what the commits and diff ACTUALLY show was done — not based on the task prompt alone. The task prompt tells you what was requested; the diff and commits tell you what was actually implemented. Start with a ## Task section containing the original task prompt as a blockquote. End with a horizontal rule and \"> Created by [deer](https://github.com/zdavison/deer) — review carefully.\""
+        : "body: follow the PR template structure above, filling in each section based on what the commits and diff ACTUALLY show was done. End with a horizontal rule and \"> Created by [deer](https://github.com/zdavison/deer) — review carefully.\"")
+    : (prompt
+        ? "body: markdown starting with a ## Task section containing the original task prompt as a blockquote, followed by a ## Summary section describing what changed and why, then a ## Changes section with bullet points of key changes. End with a horizontal rule and \"> Created by [deer](https://github.com/zdavison/deer) — review carefully.\""
+        : "body: markdown starting with a ## Summary section describing what changed and why, then a ## Changes section with bullet points of key changes. End with a horizontal rule and \"> Created by [deer](https://github.com/zdavison/deer) — review carefully.\"");
 
   const prLang = getPRLanguage();
   const languageRule = prLang
     ? `\n- Language: Write the title and body in ${prLang}. branchName must remain short kebab-case ASCII English regardless of language.`
     : "";
 
-  const metadataPrompt = `You are generating metadata for a pull request. Analyze the following task prompt, commits, and diff, then produce EXACTLY the following JSON (no markdown fences, no extra text):
+  const taskPromptSection = prompt ? `\nTask prompt:\n${prompt}\n` : "";
+
+  const metadataPrompt = `You are generating metadata for a pull request. Analyze the following commits and diff, then produce EXACTLY the following JSON (no markdown fences, no extra text):
 
 {"branchName": "<short-kebab-case-name>", "title": "<PR title under 70 chars>", "body": "<PR body in markdown>"}
 
@@ -294,10 +302,7 @@ Rules:
 - title: concise, imperative mood (e.g. "Fix login redirect loop", "Add user search endpoint")
 - ${bodyInstruction}
 - CRITICAL: The Changes section MUST only reference files that actually appear in the diff below. Do NOT infer or guess file changes based on the task prompt. The changed files are EXACTLY: ${changedFiles || "(none)"}${languageRule}
-${templateSection}
-Task prompt:
-${prompt}
-
+${templateSection}${taskPromptSection}
 Commits:
 ${commitLog}
 
@@ -347,13 +352,15 @@ ${truncatedDiff}`;
     };
   } catch (err) {
     onLog?.(`[pr] generatePRMetadata failed (using fallback): ${err instanceof Error ? err.message : String(err)}`);
-    const clean = prompt.replace(/\n/g, " ").trim();
+    const clean = prompt ? prompt.replace(/\n/g, " ").trim() : "Interactive session";
     const title = ensureDeerEmojiPrefix(clean.length > 65 ? clean.slice(0, 62) + "..." : clean);
+    const taskSection = prompt
+      ? [`> ${prompt.length > 200 ? prompt.slice(0, 200) + "..." : prompt}`, ""]
+      : [];
     const body = [
       "## Summary",
       "",
-      `> ${prompt.length > 200 ? prompt.slice(0, 200) + "..." : prompt}`,
-      "",
+      ...taskSection,
       "### Commits",
       "",
       "```",

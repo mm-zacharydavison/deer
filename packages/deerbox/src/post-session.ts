@@ -39,7 +39,7 @@ export interface PostSessionDeps {
     worktreePath: string;
     branch: string;
     baseBranch: string;
-    prompt: string;
+    prompt: string | null;
     onLog?: (msg: string) => void;
   }) => Promise<CreatePRResult>;
   /** Update an existing pull request (called when ctx.fromPrUrl is set). */
@@ -59,7 +59,8 @@ export interface PostSessionContext {
   worktreePath: string;
   branch: string;
   baseBranch: string;
-  prompt: string;
+  /** The task prompt, or null if the session was started interactively without a prompt. */
+  prompt: string | null;
   /**
    * When set, the user started from an existing PR/branch. The 'p' menu
    * option becomes "Update existing PR" and calls updatePR instead of createPR.

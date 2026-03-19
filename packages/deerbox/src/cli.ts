@@ -289,7 +289,7 @@ async function cmdRun(prompt: string | undefined, args: string[]) {
       worktreePath: session.worktreePath,
       branch: session.branch,
       baseBranch: postSessionBaseBranch,
-      prompt: prompt ?? "Interactive session",
+      prompt: prompt ?? null,
       fromPrUrl: fromPrUrl ?? undefined,
     },
     {
