@@ -14,16 +14,14 @@ export interface PruneResult {
 export interface PruneOptions {
   /** Wipe all deer resources (kill processes, tmux sessions, remove all task data). */
   force?: boolean;
-  /** Print what would be done without making any changes. */
-  dryRun?: boolean;
-  /** Called for each action taken (or that would be taken in dry-run). */
+  /** Called for each action taken. */
   log?: (msg: string) => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function emit(msg: string, opts: PruneOptions): void {
-  opts.log?.(opts.dryRun ? `[dry-run] ${msg}` : msg);
+  opts.log?.(msg);
 }
 
 /**
@@ -72,11 +70,9 @@ async function removeWorktreeAndBranch(
   opts: PruneOptions,
 ): Promise<void> {
   emit(`Removing worktree: ${worktreePath} (branch: ${branch})`, opts);
-  if (!opts.dryRun) {
-    await Bun.$`git -C ${repoPath} worktree remove ${worktreePath} --force`.quiet().nothrow();
-    if (branch.startsWith("deer/")) {
-      await Bun.$`git -C ${repoPath} branch -D ${branch}`.quiet().nothrow();
-    }
+  await Bun.$`git -C ${repoPath} worktree remove ${worktreePath} --force`.quiet().nothrow();
+  if (branch.startsWith("deer/")) {
+    await Bun.$`git -C ${repoPath} branch -D ${branch}`.quiet().nothrow();
   }
 }
 
@@ -91,9 +87,7 @@ async function killSandboxProcesses(opts: PruneOptions): Promise<number> {
     const pid = line.split(/\s+/)[0];
     if (!pid) continue;
     emit(`Killing srt process ${pid}: ${line.slice(0, 120)}`, opts);
-    if (!opts.dryRun) {
-      await Bun.$`kill -9 ${pid}`.quiet().nothrow();
-    }
+    await Bun.$`kill -9 ${pid}`.quiet().nothrow();
     killed++;
   }
   return killed;
@@ -111,9 +105,7 @@ async function killTmuxSessions(opts: PruneOptions): Promise<number> {
 
   for (const session of sessions) {
     emit(`Killing tmux session: ${session}`, opts);
-    if (!opts.dryRun) {
-      await Bun.$`tmux kill-session -t ${session}`.quiet().nothrow();
-    }
+    await Bun.$`tmux kill-session -t ${session}`.quiet().nothrow();
   }
   return sessions.length;
 }
@@ -157,9 +149,7 @@ export async function prune(opts: PruneOptions = {}): Promise<PruneResult> {
     // Wipe the entire tasks directory
     const tasksDir = join(dataDir(), "tasks");
     emit(`Removing tasks directory: ${tasksDir} (${taskDirs.length} entries)`, opts);
-    if (!opts.dryRun) {
-      await Bun.$`rm -rf ${tasksDir}`.quiet().nothrow();
-    }
+    await Bun.$`rm -rf ${tasksDir}`.quiet().nothrow();
     result.tasksRemoved = taskDirs.length;
   } else {
     // Normal mode: prune only dangling task dirs (no live tmux session)
@@ -178,9 +168,7 @@ export async function prune(opts: PruneOptions = {}): Promise<PruneResult> {
       }
 
       emit(`Removing task dir: ${taskDir}`, opts);
-      if (!opts.dryRun) {
-        await Bun.$`rm -rf ${taskDir}`.quiet().nothrow();
-      }
+      await Bun.$`rm -rf ${taskDir}`.quiet().nothrow();
       result.tasksRemoved++;
     }
   }

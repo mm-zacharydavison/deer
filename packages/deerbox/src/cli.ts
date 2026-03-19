@@ -120,15 +120,9 @@ async function cmdDestroy(args: string[]) {
 
 async function cmdPrune(args: string[]) {
   const force = hasFlag(args, "--force");
-  const dryRun = hasFlag(args, "--dry-run");
-
-  if (dryRun) {
-    console.log("Running in dry-run mode (no changes will be made)\n");
-  }
 
   const result = await prune({
     force,
-    dryRun,
     log: console.log,
   });
 
@@ -139,10 +133,6 @@ async function cmdPrune(args: string[]) {
   }
   console.log(`  worktrees removed:        ${result.worktreesRemoved}`);
   console.log(`  task dirs cleaned:        ${result.tasksRemoved}`);
-
-  if (dryRun) {
-    console.log("\nNo changes were made. Run without --dry-run to execute.");
-  }
 }
 
 // ── Subcommand: preflight ────────────────────────────────────────────
@@ -271,14 +261,13 @@ Interactive options:
 
 Prune options:
   --force                       Kill all processes/sessions and wipe all task data
-  --dry-run                     Show what would be removed without making changes
 
 Examples:
   deerbox
   deerbox "fix the login redirect bug"
   deerbox --model opus "refactor the auth module"
   deerbox prune
-  deerbox prune --force --dry-run`;
+  deerbox prune --force`;
 
 async function main() {
   const args = process.argv.slice(2);

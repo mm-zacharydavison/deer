@@ -72,20 +72,6 @@ describe("prune — normal mode", () => {
     expect(result.tasksRemoved).toBe(3);
   });
 
-  test("dry-run does not remove task dirs", async () => {
-    const taskId = "deer_test_prune_dryrun";
-    const taskDir = await createFakeTaskDir(tmpDir, taskId);
-
-    const logs: string[] = [];
-    const result = await prune({ dryRun: true, log: (m) => logs.push(m) });
-
-    expect(result.tasksRemoved).toBe(1);
-    // Directory should still exist
-    const dirExists = await Bun.file(join(taskDir, "gitconfig")).exists();
-    expect(dirExists).toBe(true);
-    // Log messages should include [dry-run] prefix
-    expect(logs.some((l) => l.startsWith("[dry-run]"))).toBe(true);
-  });
 });
 
 describe("prune — force mode", () => {
@@ -115,17 +101,4 @@ describe("prune — force mode", () => {
     expect(exists).toBe(false);
   });
 
-  test("force dry-run does not remove task dirs", async () => {
-    await createFakeTaskDir(tmpDir, "deer_test_force_dryrun");
-
-    const tasksDir = join(tmpDir, ".local", "share", "deer", "tasks");
-
-    const result = await prune({ force: true, dryRun: true });
-    expect(result.tasksRemoved).toBe(1);
-
-    // Tasks dir should still exist
-    const taskDirContents = await Bun.$`ls ${tasksDir}`.quiet().nothrow();
-    expect(taskDirContents.exitCode).toBe(0);
-    expect(taskDirContents.stdout.toString()).toContain("deer_test_force_dryrun");
-  });
 });

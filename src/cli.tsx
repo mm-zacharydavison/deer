@@ -47,11 +47,6 @@ const TERMINAL_STATUSES = new Set(["failed", "cancelled", "interrupted", "pr_fai
 
 async function cmdPrune(args: string[]) {
   const force = args.includes("--force");
-  const dryRun = args.includes("--dry-run");
-
-  if (dryRun) {
-    console.log("Running in dry-run mode (no changes will be made)\n");
-  }
 
   const tasks = getAllTasks();
 
@@ -64,29 +59,21 @@ async function cmdPrune(args: string[]) {
 
     if (!isDangling) continue;
 
-    if (dryRun) {
-      console.log(`[dry-run] Would remove DB row for task: ${task.task_id} (${task.status})`);
-    } else {
-      deleteTaskRow(task.task_id);
-      dbRowsRemoved++;
-    }
+    deleteTaskRow(task.task_id);
+    dbRowsRemoved++;
   }
 
-  const result = await prune({ force, dryRun, log: console.log });
+  const result = await prune({ force, log: console.log });
 
   if (force) {
     // Also wipe prompt history when doing a full force prune
     const promptHistoryPath = `${process.env.HOME}/.local/share/deer/prompt-history.json`;
-    if (dryRun) {
-      console.log(`[dry-run] Would remove prompt history: ${promptHistoryPath}`);
-    } else {
-      await Bun.$`rm -f ${promptHistoryPath}`.quiet().nothrow();
-    }
+    await Bun.$`rm -f ${promptHistoryPath}`.quiet().nothrow();
   }
 
   console.log("\nDone:");
-  if (dbRowsRemoved > 0 || dryRun) {
-    console.log(`  DB rows removed:          ${dryRun ? tasks.filter((t) => TERMINAL_STATUSES.has(t.status)).length : dbRowsRemoved}`);
+  if (dbRowsRemoved > 0) {
+    console.log(`  DB rows removed:          ${dbRowsRemoved}`);
   }
   if (force) {
     console.log(`  sandbox processes killed: ${result.processesKilled}`);
@@ -94,10 +81,6 @@ async function cmdPrune(args: string[]) {
   }
   console.log(`  worktrees removed:        ${result.worktreesRemoved}`);
   console.log(`  task dirs cleaned:        ${result.tasksRemoved}`);
-
-  if (dryRun) {
-    console.log("\nNo changes were made. Run without --dry-run to execute.");
-  }
 }
 
 // ── Main ──────────────────────────────────────────────────────────────
