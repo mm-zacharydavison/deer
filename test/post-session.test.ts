@@ -223,6 +223,18 @@ describe("runPostSession", () => {
 
 // ── fromPrUrl (--from) ───────────────────────────────────────────────
 
+describe("runPostSession with --from and no new changes", () => {
+  test("no new changes with fromPrUrl → destroys worktree, does not prompt", async () => {
+    const deps = makeDeps({ hasChanges: false });
+    const ctx = makeCtx({ fromPrUrl: "https://github.com/org/repo/pull/42", branch: "feature/auth-fix" });
+    const outcome = await runPostSession(ctx, deps);
+
+    expect(outcome.action).toBe("no_changes");
+    expect(deps._tracker.destroyCalled).toBe(true);
+    expect(deps._tracker.logs.some((l) => l.includes("No changes"))).toBe(true);
+  });
+});
+
 describe("runPostSession with fromPrUrl", () => {
   test("choice p → calls updatePR instead of createPR", async () => {
     const fromPrUrl = "https://github.com/org/repo/pull/42";

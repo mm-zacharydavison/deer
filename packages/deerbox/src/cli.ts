@@ -234,6 +234,13 @@ async function cmdRun(prompt: string | undefined, args: string[]) {
     onStatus: (msg) => console.error(`  ${msg}`),
   });
 
+  // Capture HEAD before Claude runs so we can detect only new changes for --from
+  let initialHeadSha: string | undefined;
+  if (fromResolution) {
+    const headResult = await Bun.$`git -C ${session.worktreePath} rev-parse HEAD`.quiet().nothrow();
+    initialHeadSha = headResult.stdout.toString().trim() || undefined;
+  }
+
   console.error(`Starting sandboxed Claude...\n`);
 
   const proc = Bun.spawn(session.command, {
@@ -265,7 +272,7 @@ async function cmdRun(prompt: string | undefined, args: string[]) {
       fromPrUrl: fromPrUrl ?? undefined,
     },
     {
-      hasChanges,
+      hasChanges: (wt, base) => hasChanges(wt, base, initialHeadSha),
       promptChoice: () => interactivePromptChoice(fromPrUrl ?? undefined),
       createPR: createPullRequest,
       updatePR: (opts) => updatePullRequest(opts),

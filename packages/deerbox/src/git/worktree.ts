@@ -93,6 +93,12 @@ export async function checkoutWorktree(
   taskId: string,
   branch: string,
 ): Promise<WorktreeInfo> {
+  // Check if a worktree already exists for this branch
+  const existing = await findWorktreeForBranch(repoPath, branch);
+  if (existing) {
+    return { repoPath, worktreePath: existing, branch };
+  }
+
   const worktreePath = join(dataDir(), "tasks", taskId, "worktree");
 
   await mkdir(join(dataDir(), "tasks", taskId), { recursive: true });
@@ -108,6 +114,31 @@ export async function checkoutWorktree(
   }
 
   return { repoPath, worktreePath, branch };
+}
+
+/**
+ * Find an existing worktree that has the given branch checked out.
+ * @returns The worktree path, or null if no worktree is using that branch.
+ */
+async function findWorktreeForBranch(repoPath: string, branch: string): Promise<string | null> {
+  const result = await Bun.$`git -C ${repoPath} worktree list --porcelain`.quiet().nothrow();
+  if (result.exitCode !== 0) return null;
+
+  const output = result.stdout.toString();
+  let currentWorktree: string | null = null;
+
+  for (const line of output.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      currentWorktree = line.slice("worktree ".length);
+    } else if (line.startsWith("branch refs/heads/") && currentWorktree) {
+      const branchName = line.slice("branch refs/heads/".length);
+      if (branchName === branch) return currentWorktree;
+    } else if (line === "") {
+      currentWorktree = null;
+    }
+  }
+
+  return null;
 }
 
 /**

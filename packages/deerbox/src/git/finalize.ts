@@ -174,14 +174,43 @@ export function parsePRMetadataResponse(rawOutput: string): { branchName: string
     // Not wrapped — use the raw output as-is
   }
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error(`No JSON found in Claude response: ${text.slice(0, 200)}`);
+  const jsonStr = extractFirstJsonObject(text);
+  if (!jsonStr) throw new Error(`No JSON found in Claude response: ${text.slice(0, 200)}`);
 
-  const parsed = JSON.parse(jsonMatch[0]);
+  const parsed = JSON.parse(jsonStr);
   if (!parsed.branchName || !parsed.title || !parsed.body) {
     throw new Error("Missing required fields in Claude response");
   }
   return { branchName: parsed.branchName, title: parsed.title, body: parsed.body };
+}
+
+/**
+ * Extract the first balanced JSON object from a string.
+ * Tracks brace depth and respects string boundaries, so braces inside
+ * JSON string values don't break extraction.
+ */
+function extractFirstJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\" && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    if (ch === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -445,12 +474,16 @@ export async function updatePullRequest(options: UpdatePROptions): Promise<void>
   await pushBranch(worktreePath, finalBranch);
   log(`[pr] Push succeeded`);
 
-  // Update the PR title and body
-  log(`[pr] Running gh pr edit ${prUrl}...`);
-  const editResult = await Bun.$`gh pr edit ${prUrl} --title ${metadata.title} --body ${metadata.body}`.cwd(repoPath).quiet().nothrow();
+  // Update the PR title and body via REST API to avoid deprecated projectCards GraphQL query
+  const prMatch = prUrl.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+  if (!prMatch) throw new Error(`Could not parse PR URL: ${prUrl}`);
+  const [, owner, repo, prNumber] = prMatch;
+
+  log(`[pr] Updating PR ${owner}/${repo}#${prNumber} via REST API...`);
+  const editResult = await Bun.$`gh api repos/${owner}/${repo}/pulls/${prNumber} --method PATCH -f title=${metadata.title} -f body=${metadata.body}`.cwd(repoPath).quiet().nothrow();
   if (editResult.exitCode !== 0) {
     const stderr = editResult.stderr.toString().trim();
-    log(`[pr] gh pr edit failed (exit ${editResult.exitCode}): ${stderr}`);
+    log(`[pr] gh api PATCH failed (exit ${editResult.exitCode}): ${stderr}`);
     throw new Error(`PR update failed: ${stderr}`);
   }
   log(`[pr] PR updated: ${prUrl}`);
@@ -458,14 +491,19 @@ export async function updatePullRequest(options: UpdatePROptions): Promise<void>
 
 /**
  * Check whether a worktree has any changes (committed or uncommitted) relative
- * to a base branch. Used to decide whether to offer PR creation.
+ * to a base branch or a specific commit. Used to decide whether to offer PR creation.
+ *
+ * @param sinceCommit - If provided, compare against this commit SHA instead of
+ *   baseBranch. Used with `--from` to detect only new changes made during the
+ *   session, ignoring commits that already existed on the branch.
  */
-export async function hasChanges(worktreePath: string, baseBranch: string): Promise<boolean> {
+export async function hasChanges(worktreePath: string, baseBranch: string, sinceCommit?: string): Promise<boolean> {
   // Check for uncommitted changes
   const statusResult = await Bun.$`git -C ${worktreePath} status --porcelain`.quiet().nothrow();
   if (statusResult.stdout.toString().trim().length > 0) return true;
 
-  // Check for commits beyond the base branch
-  const logResult = await Bun.$`git -C ${worktreePath} log --oneline ${baseBranch}..HEAD`.quiet().nothrow();
+  // Check for commits beyond the reference point
+  const ref = sinceCommit ?? baseBranch;
+  const logResult = await Bun.$`git -C ${worktreePath} log --oneline ${ref}..HEAD`.quiet().nothrow();
   return logResult.stdout.toString().trim().length > 0;
 }

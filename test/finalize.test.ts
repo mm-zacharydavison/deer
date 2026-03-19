@@ -120,6 +120,31 @@ describe("parsePRMetadataResponse", () => {
     const rawOutput = JSON.stringify({ type: "result", result: "" });
     expect(() => parsePRMetadataResponse(rawOutput)).toThrow();
   });
+
+  test("handles body containing unbalanced braces in code blocks", () => {
+    const body = "## Changes\n- Updated `Config { value: 1 }` struct\n```ts\nfunction() {\n  return 1;\n}\n```";
+    const rawOutput = JSON.stringify({
+      type: "result",
+      result: JSON.stringify({ branchName: "fix-config", title: "Fix config struct", body }),
+    });
+    const parsed = parsePRMetadataResponse(rawOutput);
+    expect(parsed.branchName).toBe("fix-config");
+    expect(parsed.body).toBe(body);
+  });
+
+  test("extracts first JSON object when surrounded by extra text", () => {
+    const rawOutput = 'Here is the metadata:\n{"branchName": "fix", "title": "Fix it", "body": "done"}\nDone!';
+    const parsed = parsePRMetadataResponse(rawOutput);
+    expect(parsed.branchName).toBe("fix");
+  });
+
+  test("handles body with nested JSON-like content", () => {
+    const body = '## Changes\nUpdated config: {"key": "value"}\nAlso changed {other} stuff';
+    const inner = JSON.stringify({ branchName: "update-config", title: "Update config", body });
+    const parsed = parsePRMetadataResponse(inner);
+    expect(parsed.branchName).toBe("update-config");
+    expect(parsed.body).toBe(body);
+  });
 });
 
 describe("buildClaudeSubprocessEnv", () => {
