@@ -20,6 +20,7 @@
     "build": "bun run scripts/build.ts"
   },
   "dependencies": {
+    "@deer/shared": "workspace:*",
     "@inkjs/ui": "^2.0.0",
     "ink": "^6.0.0",
     "react": "^19.0.0",

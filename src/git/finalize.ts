@@ -1,7 +1,3 @@
-/**
- * Re-export finalize functions from deerbox.
- * The implementation lives in packages/deerbox/src/git/finalize.ts.
- */
 export {
   createPullRequest,
   updatePullRequest,
@@ -11,10 +7,10 @@ export {
   ensureDeerEmojiPrefix,
   parsePRMetadataResponse,
   buildClaudeSubprocessEnv,
-} from "deerbox";
+} from "@deer/shared";
 export type {
   CreatePRResult,
   CreatePROptions,
   UpdatePROptions,
   PushBranchOptions,
-} from "deerbox";
+} from "@deer/shared";

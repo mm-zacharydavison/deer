@@ -4,16 +4,21 @@ Unattended coding agent — runs Claude Code in sandboxed tmux sessions against 
 
 ## Monorepo Structure
 
-Bun workspace monorepo with two packages:
+Bun workspace monorepo with three packages:
 
+- **`packages/shared/`** — Shared utilities used by both deerbox and the TUI (private, never published)
 - **`packages/deerbox/`** — Core sandbox orchestration library (no TUI dependencies)
-- **Root (`src/`)** — Ink/React TUI dashboard that imports from `deerbox`
+- **Root (`src/`)** — Ink/React TUI dashboard
 
 ```
 deer/                          # workspace root
   package.json                 # "workspaces": ["packages/*"]
-  src/                         # deer TUI source (imports from "deerbox")
+  src/                         # deer TUI source (imports from "@deer/shared")
   packages/
+    shared/
+      src/                     # shared utilities: constants, i18n, credentials, git/detect, git/finalize
+      package.json             # name: "@deer/shared", private: true
+      tsconfig.json
     deerbox/
       src/                     # core modules (agent, sandbox, config, etc.)
       package.json
@@ -44,6 +49,19 @@ Each agent task:
 3. deer TUI launches the prepared command in a tmux session (`deer-<taskId>`) via `src/sandbox/index.ts`
 4. Finalizes by creating a GitHub PR and cleaning up
 
+### @deer/shared (shared utilities)
+
+Private package — never published. Both deerbox and the TUI depend on it.
+
+| File                                         | Purpose                                                        |
+|----------------------------------------------|----------------------------------------------------------------|
+| `packages/shared/src/index.ts`               | Barrel export for all shared APIs                              |
+| `packages/shared/src/constants.ts`           | Shared constants (HOME, DEFAULT_MODEL, BYPASS_DIALOG_*, MAX_DIFF_FOR_PR_METADATA, PR_METADATA_MODEL) |
+| `packages/shared/src/i18n.ts`                | Language detection, setLang/getLang/getPRLanguage/detectLang   |
+| `packages/shared/src/credentials.ts`         | resolveCredentials() — OAuth/API key resolution from env/files/keychain |
+| `packages/shared/src/git/detect.ts`          | detectRepo() — git repo detection by walking up from a directory |
+| `packages/shared/src/git/finalize.ts`        | PR creation: createPullRequest, updatePullRequest, pushBranchUpdates, hasChanges |
+
 ### deerbox (core library)
 
 deer treats deerbox as a black box — all interaction happens through CLI subcommands (`packages/deerbox/src/cli.ts`) that output JSON to stdout.
@@ -55,17 +73,17 @@ deer treats deerbox as a black box — all interaction happens through CLI subco
 | `packages/deerbox/src/session.ts`           | Main entrypoint: worktree → ecosystem → gitconfig → auth proxy → SRT command |
 | `packages/deerbox/src/proxy.ts`             | Credential resolution for the MITM auth proxy                  |
 | `packages/deerbox/src/config.ts`            | Config loading/merging (global + repo-local + CLI)             |
-| `packages/deerbox/src/constants.ts`         | Core constants (VERSION, HOME, DEFAULT_MODEL, BYPASS_DIALOG_*) |
-| `packages/deerbox/src/preflight.ts`         | Preflight checks (srt/bwrap/tmux/claude/gh) and credentials   |
+| `packages/deerbox/src/constants.ts`         | VERSION + re-exports shared constants from @deer/shared        |
+| `packages/deerbox/src/preflight.ts`         | Preflight checks (srt/bwrap/tmux/claude/gh); re-exports resolveCredentials from @deer/shared |
 | `packages/deerbox/src/task.ts`              | Task ID generation, data directory                             |
 | `packages/deerbox/src/ecosystems.ts`        | Ecosystem-aware dependency strategies                          |
-| `packages/deerbox/src/i18n.ts`              | Locale detection and UI string translations                    |
+| `packages/deerbox/src/i18n.ts`              | Re-exports i18n from @deer/shared                              |
 | `packages/deerbox/src/sandbox/index.ts`     | Sandbox launch orchestration                                   |
 | `packages/deerbox/src/sandbox/runtime.ts`   | `SandboxRuntime` interface                                     |
 | `packages/deerbox/src/sandbox/resolve.ts`   | `resolveRuntime()` — maps config string to `SandboxRuntime`   |
 | `packages/deerbox/src/sandbox/srt.ts`       | SRT runtime implementation                                     |
 | `packages/deerbox/src/sandbox/auth-proxy.ts` | Host-side MITM proxy for credential injection                 |
-| `packages/deerbox/src/git/worktree.ts`      | Git worktree create/remove/detect/cleanup                      |
+| `packages/deerbox/src/git/worktree.ts`      | Git worktree create/remove/cleanup; re-exports detectRepo from @deer/shared |
 
 ### deer (TUI dashboard)
 
