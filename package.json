@@ -1,9 +1,11 @@
 {
   "name": "@zdavison/deer",
-  "version": "0.5.0",
+  "version": "0.6.2",
   "description": "Unattended coding agent.",
   "type": "module",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "bin": {
     "deer": "scripts/install.js"
   },
