@@ -35,7 +35,7 @@ import { setLang, detectLang } from "./i18n";
 import { VERSION } from "./constants";
 import Dashboard from "./dashboard.tsx";
 import DemoDashboard from "./demo-dashboard.tsx";
-import { checkAndUpdate } from "./updater.ts";
+import { checkAndUpdateDeer } from "./updater.ts";
 import { prune, isTmuxSessionAlive } from "deerbox";
 import { getAllTasks, deleteTaskRow } from "./db.ts";
 
@@ -111,7 +111,7 @@ async function main() {
     return;
   }
 
-  await checkAndUpdate();
+  await checkAndUpdateDeer();
 
   const startDir = process.cwd();
 

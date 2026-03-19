@@ -22,7 +22,7 @@ import { runPreflight } from "./preflight";
 import { resolveCredentials } from "@deer/shared";
 import { killAuthProxy } from "./sandbox/auth-proxy";
 import { VERSION } from "./constants";
-import { DEFAULT_MODEL, setLang, detectLang } from "@deer/shared";
+import { DEFAULT_MODEL, setLang, detectLang, checkAndUpdate } from "@deer/shared";
 import { dataDir } from "./task";
 import { createPullRequest, updatePullRequest, hasChanges } from "./git/finalize";
 import { runPostSession, interactivePromptChoice, defaultOpenShell } from "./post-session";
@@ -360,6 +360,9 @@ async function main() {
   if (first === "prune") return cmdPrune(args.slice(1));
   if (first === "preflight") return cmdPreflight();
   if (first === "config") return cmdConfig(args.slice(1));
+
+  // Auto-update only in interactive mode
+  await checkAndUpdate({ name: "deerbox", version: VERSION });
 
   // Interactive mode: collect prompt from positional args
   const positional: string[] = [];

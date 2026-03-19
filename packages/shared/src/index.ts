@@ -13,6 +13,10 @@ export type { CredentialType } from "./credentials";
 export { detectRepo } from "./git/detect";
 export type { RepoInfo } from "./git/detect";
 
+// Updater
+export { checkAndUpdate } from "./updater";
+export type { UpdateOptions } from "./updater";
+
 // Git finalize (PR creation)
 export {
   createPullRequest,

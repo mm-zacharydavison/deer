@@ -23,16 +23,29 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Set version from tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          # Update all workspace package.json versions to match the release tag
+          for pkg in package.json packages/*/package.json; do
+            jq --arg v "$VERSION" '.version = $v' "$pkg" > "$pkg.tmp" && mv "$pkg.tmp" "$pkg"
+          done
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Build binaries
         run: |
           mkdir -p dist
-          bun build --compile --target=bun-linux-x64   src/cli.tsx --outfile dist/deer-linux-x64
-          bun build --compile --target=bun-linux-arm64  src/cli.tsx --outfile dist/deer-linux-arm64
-          bun build --compile --target=bun-darwin-x64  src/cli.tsx --outfile dist/deer-darwin-x64
-          bun build --compile --target=bun-darwin-arm64 src/cli.tsx --outfile dist/deer-darwin-arm64
+          bun build --compile --target=bun-linux-x64    src/cli.tsx              --outfile dist/deer-linux-x64
+          bun build --compile --target=bun-linux-arm64   src/cli.tsx              --outfile dist/deer-linux-arm64
+          bun build --compile --target=bun-darwin-x64   src/cli.tsx              --outfile dist/deer-darwin-x64
+          bun build --compile --target=bun-darwin-arm64  src/cli.tsx              --outfile dist/deer-darwin-arm64
+          bun build --compile --target=bun-linux-x64    packages/deerbox/src/cli.ts --outfile dist/deerbox-linux-x64
+          bun build --compile --target=bun-linux-arm64   packages/deerbox/src/cli.ts --outfile dist/deerbox-linux-arm64
+          bun build --compile --target=bun-darwin-x64   packages/deerbox/src/cli.ts --outfile dist/deerbox-darwin-x64
+          bun build --compile --target=bun-darwin-arm64  packages/deerbox/src/cli.ts --outfile dist/deerbox-darwin-arm64
 
       - name: Verify binaries
         run: ls -lh dist/
@@ -40,6 +53,8 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/deer-*
+          files: |
+            dist/deer-*
+            dist/deerbox-*
           generate_release_notes: true
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
