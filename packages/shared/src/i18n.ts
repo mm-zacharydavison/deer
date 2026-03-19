@@ -1,8 +1,3 @@
-// ── i18n (deerbox) ───────────────────────────────────────────────────
-//
-// Language detection and PR language support for the core library.
-// The full string table and t() function live in deer's src/i18n.ts.
-
 export type Lang = "en" | "ja" | "zh" | "ko" | "ru";
 
 let _lang: Lang = "en";

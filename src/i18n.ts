@@ -8,8 +8,8 @@
 //   t("header_idle")                        // "idle" | "待機中"
 //   t("header_active", { n: 3 })            // "3 active" | "3件実行中"
 
-import { setLang as _setLang, getLang as _getLang } from "deerbox";
-export { getPRLanguage } from "deerbox";
+import { setLang as _setLang, getLang as _getLang } from "@deer/shared";
+export { getPRLanguage } from "@deer/shared";
 
 export type Lang = "en" | "ja" | "zh" | "ko" | "ru";
 
@@ -481,34 +481,7 @@ export function getLang(): Lang {
   return _getLang();
 }
 
-/**
- * Detect language from CLI args, CLAUDE_CODE_LOCALE, or system LANG.
- * Priority: --lang=<code> > CLAUDE_CODE_LOCALE > system LANG > "en"
- */
-export function detectLang(): Lang {
-  const langArg = process.argv.find((a) => a.startsWith("--lang="));
-  if (langArg) {
-    const val = langArg.split("=")[1]?.toLowerCase();
-    if (val === "jp" || val === "ja") return "ja";
-    if (val === "zh" || val === "zh-cn" || val === "zh_cn") return "zh";
-    if (val === "ko") return "ko";
-    if (val === "ru") return "ru";
-  }
-
-  const claudeLocale = process.env.CLAUDE_CODE_LOCALE;
-  if (claudeLocale?.toLowerCase().startsWith("ja")) return "ja";
-  if (claudeLocale?.toLowerCase().startsWith("zh")) return "zh";
-  if (claudeLocale?.toLowerCase().startsWith("ko")) return "ko";
-  if (claudeLocale?.toLowerCase().startsWith("ru")) return "ru";
-
-  const sysLang = process.env.LANG;
-  if (sysLang?.toLowerCase().startsWith("ja")) return "ja";
-  if (sysLang?.toLowerCase().startsWith("zh")) return "zh";
-  if (sysLang?.toLowerCase().startsWith("ko")) return "ko";
-  if (sysLang?.toLowerCase().startsWith("ru")) return "ru";
-
-  return "en";
-}
+export { detectLang } from "@deer/shared";
 
 /**
  * Look up a translated string, interpolating {key} placeholders from vars.
