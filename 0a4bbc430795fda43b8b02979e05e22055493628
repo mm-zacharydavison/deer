@@ -1,0 +1,23 @@
+packages/deerbox/src/sandbox/srt.ts
+  31acd683bb4f138f 117-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "0a4bbc430795fda43b8b02979e05e22055493628",
+  "prompts": {
+    "31acd683bb4f138f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1eccf32b-54ed-4397-bc27-74bcfe513108",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "deer-agent <deer@noreply>",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 0,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
