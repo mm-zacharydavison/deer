@@ -1,0 +1,47 @@
+packages/deerbox/src/git/finalize.ts
+  7d82dd523eaf7aee 5,17
+test/preflight.test.ts
+  016dc436b1de4da2 44,57,70,81,94,106,132,148,163,178,191,204,217
+packages/shared/src/index.ts
+  016dc436b1de4da2 10
+  7d82dd523eaf7aee 25,37
+packages/shared/src/git/finalize.ts
+  7d82dd523eaf7aee 536-581
+packages/shared/src/credentials.ts
+  016dc436b1de4da2 21-32,43
+packages/deerbox/src/post-session.ts
+  7d82dd523eaf7aee 7-8,51,198-206,247-248,250-251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "6aca2f49203832678348f1f2d34fa1572da17300",
+  "prompts": {
+    "016dc436b1de4da2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a6c37ac2-1c8d-40ec-a400-18b5540da2f5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "deer-agent <deer@noreply>",
+      "messages": [],
+      "total_additions": 27,
+      "total_deletions": 16,
+      "accepted_lines": 27,
+      "overriden_lines": 0
+    },
+    "7d82dd523eaf7aee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d668425-349d-4ebf-b06b-5aed2995ce19",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "deer-agent <deer@noreply>",
+      "messages": [],
+      "total_additions": 79,
+      "total_deletions": 25,
+      "accepted_lines": 66,
+      "overriden_lines": 0
+    }
+  }
+}
