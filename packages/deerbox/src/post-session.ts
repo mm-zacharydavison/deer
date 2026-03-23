@@ -17,7 +17,7 @@ const red = (s: string) => `\x1b[31m${s}\x1b[39m`;
 
 // ── Types ────────────────────────────────────────────────────────────
 
-export type PostSessionChoice = "p" | "k" | "s" | "d";
+export type PostSessionChoice = "p" | "k" | "s" | "d" | "m";
 
 export type PostSessionOutcome =
   | { action: "no_changes" }
@@ -26,6 +26,8 @@ export type PostSessionOutcome =
   | { action: "pr_failed"; error: string }
   | { action: "keep"; worktreePath: string }
   | { action: "shell"; worktreePath: string }
+  | { action: "merged"; targetBranch: string }
+  | { action: "merge_failed"; error: string }
   | { action: "discard" };
 
 export interface PostSessionDeps {
@@ -44,6 +46,8 @@ export interface PostSessionDeps {
   }) => Promise<CreatePRResult>;
   /** Update an existing pull request (called when ctx.fromPrUrl is set). */
   updatePR?: (opts: UpdatePROptions) => Promise<void>;
+  /** Merge sourceBranch into targetBranch in the repo. */
+  mergeBranch?: (repoPath: string, sourceBranch: string, targetBranch: string) => Promise<void>;
   /** Open a shell in the worktree. Resolves when the shell exits. */
   openShell: (worktreePath: string) => Promise<void>;
   /** Stop the auth proxy (no worktree removal). */
@@ -67,25 +71,32 @@ export interface PostSessionContext {
    * @example "https://github.com/org/repo/pull/42"
    */
   fromPrUrl?: string;
+  /**
+   * The branch the user was on when they invoked deerbox. When set, the 'm'
+   * menu option merges the session branch into this branch.
+   */
+  originalBranch?: string;
 }
 
 // ── Prompt rendering ─────────────────────────────────────────────────
 
-export function renderPromptMenu(fromPrUrl?: string): string {
+export function renderPromptMenu(fromPrUrl?: string, originalBranch?: string): string {
   const prLine = fromPrUrl
     ? `  ${green(bold("p"))}  ${green(`Update existing PR: ${fromPrUrl}`)}`
     : `  ${green(bold("p"))}  ${green("Create a pull request")}`;
-  return [
+  const lines = [
     "",
     bold("What would you like to do with this session's changes?"),
     "",
     prLine,
     `  ${cyan(bold("k"))}  ${cyan("Keep worktree")}  ${dim("(default)")}`,
     `  ${yellow(bold("s"))}  ${yellow("Open a shell in the worktree")}`,
-    `  ${red(bold("d"))}  ${red("Discard")}`,
-    "",
-    `${bold("Choice:")} `,
-  ].join("\n");
+  ];
+  if (originalBranch) {
+    lines.push(`  ${green(bold("m"))}  ${green(`Merge into ${originalBranch}`)}`);
+  }
+  lines.push(`  ${red(bold("d"))}  ${red("Discard")}`, "", `${bold("Choice:")} `);
+  return lines.join("\n");
 }
 
 /**
@@ -97,6 +108,7 @@ export function parseChoice(input: string): PostSessionChoice {
   if (ch === "p") return "p";
   if (ch === "s") return "s";
   if (ch === "d") return "d";
+  if (ch === "m") return "m";
   return "k";
 }
 
@@ -179,7 +191,23 @@ export async function runPostSession(
     return { action: "shell", worktreePath: ctx.worktreePath };
   }
 
-  // d = discard
+  if (choice === "m" && ctx.originalBranch) {
+    deps.log(`\nMerging ${ctx.branch} into ${ctx.originalBranch}...`);
+    try {
+      await deps.mergeBranch?.(ctx.repoPath, ctx.branch, ctx.originalBranch);
+      deps.log(`\n${green("Merged into")} ${ctx.originalBranch}`);
+      await deps.destroy();
+      return { action: "merged", targetBranch: ctx.originalBranch };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      deps.log(`\nMerge failed: ${message}`);
+      deps.log(`Worktree kept at: ${ctx.worktreePath}`);
+      await deps.cleanup();
+      return { action: "merge_failed", error: message };
+    }
+  }
+
+  // d = discard (also fallback if "m" chosen without originalBranch)
   await deps.destroy();
   deps.log("\nWorktree discarded.");
   return { action: "discard" };
@@ -190,8 +218,8 @@ export async function runPostSession(
 /**
  * Interactive prompt via readline. Reads one line from stdin.
  */
-export async function interactivePromptChoice(fromPrUrl?: string): Promise<PostSessionChoice> {
-  process.stderr.write(renderPromptMenu(fromPrUrl));
+export async function interactivePromptChoice(fromPrUrl?: string, originalBranch?: string): Promise<PostSessionChoice> {
+  process.stderr.write(renderPromptMenu(fromPrUrl, originalBranch));
 
   const readline = await import("readline");
   return new Promise((resolve) => {
@@ -204,6 +232,19 @@ export async function interactivePromptChoice(fromPrUrl?: string): Promise<PostS
       resolve(parseChoice(line));
     });
   });
+}
+
+/**
+ * Merge sourceBranch into targetBranch using a non-fast-forward merge.
+ * Checks out targetBranch in the repo first, then merges.
+ */
+export async function defaultMergeBranch(
+  repoPath: string,
+  sourceBranch: string,
+  targetBranch: string,
+): Promise<void> {
+  await Bun.$`git -C ${repoPath} checkout ${targetBranch}`.quiet();
+  await Bun.$`git -C ${repoPath} merge ${sourceBranch} --no-ff`.quiet();
 }
 
 /**

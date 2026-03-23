@@ -25,7 +25,7 @@ import { VERSION } from "./constants";
 import { DEFAULT_MODEL, setLang, detectLang, checkAndUpdate } from "@deer/shared";
 import { dataDir } from "./task";
 import { createPullRequest, updatePullRequest, hasChanges } from "./git/finalize";
-import { runPostSession, interactivePromptChoice, defaultOpenShell } from "./post-session";
+import { runPostSession, interactivePromptChoice, defaultOpenShell, defaultMergeBranch } from "./post-session";
 import { prune } from "./prune";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -210,10 +210,14 @@ async function cmdRun(prompt: string | undefined, args: string[]) {
   const startDir = process.cwd();
   let repoPath: string;
   let defaultBranch: string;
+  let originalBranch: string | undefined;
   try {
     const repo = await detectRepo(startDir);
     repoPath = repo.repoPath;
     defaultBranch = repo.defaultBranch;
+    const branchResult = await Bun.$`git -C ${repoPath} rev-parse --abbrev-ref HEAD`.quiet().nothrow();
+    const branch = branchResult.stdout.toString().trim();
+    if (branch && branch !== "HEAD") originalBranch = branch;
   } catch (err) {
     console.error(`Error: ${err instanceof Error ? err.message : err}`);
     process.exit(1);
@@ -291,12 +295,14 @@ async function cmdRun(prompt: string | undefined, args: string[]) {
       baseBranch: postSessionBaseBranch,
       prompt: prompt ?? null,
       fromPrUrl: fromPrUrl ?? undefined,
+      originalBranch,
     },
     {
       hasChanges: (wt, base) => hasChanges(wt, base, initialHeadSha),
-      promptChoice: () => interactivePromptChoice(fromPrUrl ?? undefined),
+      promptChoice: () => interactivePromptChoice(fromPrUrl ?? undefined, originalBranch),
       createPR: createPullRequest,
       updatePR: (opts) => updatePullRequest(opts),
+      mergeBranch: defaultMergeBranch,
       openShell: defaultOpenShell,
       cleanup: () => session.cleanup(),
       destroy: () => session.destroy(),
@@ -304,7 +310,7 @@ async function cmdRun(prompt: string | undefined, args: string[]) {
     },
   );
 
-  if (outcome.action === "pr_failed") {
+  if (outcome.action === "pr_failed" || outcome.action === "merge_failed") {
     process.exit(1);
   }
 
