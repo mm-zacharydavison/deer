@@ -23,6 +23,7 @@ import { resolveCredentials } from "@deer/shared";
 import { killAuthProxy } from "./sandbox/auth-proxy";
 import { VERSION } from "./constants";
 import { DEFAULT_MODEL, setLang, detectLang, checkAndUpdate } from "@deer/shared";
+import { t } from "./i18n";
 import { dataDir } from "./task";
 import { createPullRequest, updatePullRequest, hasChanges } from "./git/finalize";
 import { runPostSession, interactivePromptChoice, defaultOpenShell, defaultMergeBranch } from "./post-session";
@@ -253,16 +254,16 @@ async function cmdRun(prompt: string | undefined, args: string[]) {
   // If --from resolved to a PR, fetch review comments and inject as system prompt context
   let prSystemPrompt: string | undefined;
   if (fromResolution?.prUrl) {
-    console.error(`  Fetching PR review comments...`);
+    console.error(`  ${t("cli_fetching_pr_comments")}`);
     const { formatted, reviewCount, issueCount } = await fetchPRComments(fromResolution.prUrl);
     const total = reviewCount + issueCount;
     if (total > 0) {
-      const rc = `${reviewCount} review comment${reviewCount !== 1 ? "s" : ""}`;
-      const ic = `${issueCount} discussion comment${issueCount !== 1 ? "s" : ""}`;
-      console.error(`  Fetched ${rc}, ${ic}`);
+      const rc = t("cli_review_comment", { n: reviewCount, s: reviewCount !== 1 ? "s" : "" });
+      const ic = t("cli_discussion_comment", { n: issueCount, s: issueCount !== 1 ? "s" : "" });
+      console.error(`  ${t("cli_fetched_comments", { rc, ic })}`);
       prSystemPrompt = formatted ?? undefined;
     } else {
-      console.error(`  No PR comments found`);
+      console.error(`  ${t("cli_no_pr_comments")}`);
     }
   }
 
