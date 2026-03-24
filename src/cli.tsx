@@ -143,12 +143,12 @@ async function main() {
     return;
   }
 
-  await checkAndUpdateDeer();
-
   if (process.argv[2] === "repair") {
     await cmdRepair();
     return;
   }
+
+  await checkAndUpdateDeer();
 
   const startDir = process.cwd();
 
