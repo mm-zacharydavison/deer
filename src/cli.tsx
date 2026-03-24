@@ -86,6 +86,24 @@ async function cmdPrune(args: string[]) {
   console.log(`  task dirs cleaned:        ${result.tasksRemoved}`);
 }
 
+// ── Subcommand: install ───────────────────────────────────────────────
+
+import { install as runInstallScript } from "../scripts/install.js";
+
+function isDevMode(): boolean {
+  const script = process.argv[1] ?? "";
+  return script.endsWith(".ts") || script.endsWith(".tsx");
+}
+
+async function cmdInstall() {
+  // Skip actual download when running from source (dev/test mode)
+  if (isDevMode()) {
+    console.log("deer install: skipping download in dev mode");
+    return;
+  }
+  await runInstallScript();
+}
+
 // ── Subcommand: repair ────────────────────────────────────────────────
 
 async function cmdRepair() {
@@ -120,6 +138,11 @@ async function cmdRepair() {
 async function main() {
   if (process.argv.includes("--version") || process.argv.includes("-v")) {
     console.log(`deer ${VERSION}`);
+    return;
+  }
+
+  if (process.argv[2] === "install") {
+    await cmdInstall();
     return;
   }
 

@@ -110,7 +110,11 @@ async function install() {
   }
 }
 
-install().catch((err) => {
-  console.error(`Error: ${err.message}`);
-  process.exit(1);
-});
+export { install };
+
+if (import.meta.main) {
+  install().catch((err) => {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  });
+}
