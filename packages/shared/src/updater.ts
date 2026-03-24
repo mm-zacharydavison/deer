@@ -111,7 +111,7 @@ export async function checkAndUpdate({ name, version }: UpdateOptions): Promise<
   // Re-exec the new binary, replacing this process.
   // Set DEER_UPDATED to prevent infinite update loops if the new binary
   // still reports an old version.
-  const proc = Bun.spawn([currentPath, ...process.argv.slice(1)], {
+  const proc = Bun.spawn([currentPath, ...process.argv.slice(2)], {
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",
