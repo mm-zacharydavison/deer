@@ -41,42 +41,62 @@ async function install() {
     );
   }
 
-  const binaryName = `deer-${os}-${cpuArch}`;
-  const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${binaryName}`;
   const installDir = join(homedir(), ".local", "bin");
-  const installPath = join(installDir, "deer");
-
-  console.log(`Downloading deer v${VERSION} for ${os}/${cpuArch}...`);
-  console.log(`From: ${url}`);
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(
-      `Download failed: ${response.status} ${response.statusText}\nURL: ${url}`
-    );
-  }
-
   await mkdir(installDir, { recursive: true });
 
-  const buffer = await response.arrayBuffer();
-  await writeFile(installPath, Buffer.from(buffer));
-  await chmod(installPath, 0o755);
+  const binaries = ["deer", "deerbox"];
+  for (const bin of binaries) {
+    const binaryName = `${bin}-${os}-${cpuArch}`;
+    const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${binaryName}`;
+    const installPath = join(installDir, bin);
 
-  console.log(`\nInstalled to: ${installPath}`);
+    console.log(`Downloading ${bin} v${VERSION} for ${os}/${cpuArch}...`);
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(
+        `Download failed: ${response.status} ${response.statusText}\nURL: ${url}`
+      );
+    }
+
+    const buffer = await response.arrayBuffer();
+    await writeFile(installPath, Buffer.from(buffer));
+    await chmod(installPath, 0o755);
+    console.log(`Installed to: ${installPath}`);
+  }
 
   // Install sandbox runtime to deer's data directory
   const deerDataDir = join(homedir(), ".local", "share", "deer");
   await mkdir(deerDataDir, { recursive: true });
   console.log(`\nInstalling ${SRT_PACKAGE}@${SRT_VERSION}...`);
+
+  const srtSpec = `${SRT_PACKAGE}@${SRT_VERSION}`;
+  let installed = false;
+
+  // Try bun first (likely available since user ran bunx)
   try {
-    execFileSync("npm", ["install", "--prefix", deerDataDir, `${SRT_PACKAGE}@${SRT_VERSION}`], {
-      stdio: "inherit",
-    });
-    console.log(`Installed ${SRT_PACKAGE} to: ${deerDataDir}`);
+    execFileSync("bun", ["add", "--cwd", deerDataDir, srtSpec], { stdio: "inherit" });
+    installed = true;
   } catch {
+    // bun not available or failed, fall through to npm
+  }
+
+  if (!installed) {
+    try {
+      execFileSync("npm", ["install", "--prefix", deerDataDir, srtSpec], { stdio: "inherit" });
+      installed = true;
+    } catch {
+      // npm also failed
+    }
+  }
+
+  if (installed) {
+    console.log(`Installed ${SRT_PACKAGE} to: ${deerDataDir}`);
+  } else {
     console.error(
       `\nWarning: Failed to install ${SRT_PACKAGE}. You can install it manually:\n` +
-      `  npm install --prefix ${deerDataDir} ${SRT_PACKAGE}`
+      `  bun add --cwd ${deerDataDir} ${SRT_PACKAGE}\n` +
+      `  # or: npm install --prefix ${deerDataDir} ${SRT_PACKAGE}`
     );
   }
 
