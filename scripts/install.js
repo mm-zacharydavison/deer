@@ -1,15 +1,10 @@
 #!/usr/bin/env node
 
 import { writeFile, chmod, mkdir } from "fs/promises";
-import { join, dirname } from "path";
+import { join } from "path";
 import { homedir, platform, arch } from "os";
-import { createRequire } from "module";
-import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
-const pkg = require("../package.json");
+import pkg from "../package.json" with { type: "json" };
 
 const REPO = "zdavison/deer";
 const VERSION = pkg.version;
