@@ -116,8 +116,8 @@ export default function Dashboard({ cwd, mockAgents }: { cwd: string; mockAgents
   // ── Load config + preflight + start config guard ───────────────────
 
   useEffect(() => {
-    if (!mockAgents) deerboxPreflight().then(setPreflight).catch(() => {
-      setPreflight({ ok: false, errors: [t("input_preflight_failed")], credentialType: "none" });
+    if (!mockAgents) deerboxPreflight().then(setPreflight).catch((err: Error) => {
+      setPreflight({ ok: false, errors: [t("input_preflight_failed"), err.message], credentialType: "none" });
     });
     deerboxConfig(cwd).then((cfg) => {
       configRef.current = cfg;
