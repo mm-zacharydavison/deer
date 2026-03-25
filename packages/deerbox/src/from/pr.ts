@@ -47,7 +47,7 @@ export const prStrategy: FromStrategy = {
       branch: data.headRefName,
       prUrl: data.url,
       baseBranch: data.baseRefName,
-      isFork: data.isCrossRepository,
+      isCrossRepository: data.isCrossRepository,
       appendSystemPrompt,
     };
   },

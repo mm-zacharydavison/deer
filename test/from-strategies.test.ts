@@ -65,9 +65,9 @@ describe("resolveFrom dispatch", () => {
   });
 });
 
-// ── prStrategy.resolve: isFork detection ─────────────────────────────
+// ── prStrategy.resolve: isCrossRepository detection ──────────────────
 
-describe("prStrategy.resolve isFork", () => {
+describe("prStrategy.resolve isCrossRepository", () => {
   const mockRunner = (isCrossRepository: boolean): GhRunner =>
     async () => ({
       stdout: JSON.stringify({
@@ -79,13 +79,13 @@ describe("prStrategy.resolve isFork", () => {
       exitCode: 0,
     });
 
-  test("sets isFork: true for cross-repository (fork) PRs", async () => {
+  test("sets isCrossRepository: true for cross-repository (fork) PRs", async () => {
     const result = await prStrategy.resolve("42", "/repo", "main", mockRunner(true));
-    expect(result.isFork).toBe(true);
+    expect(result.isCrossRepository).toBe(true);
   });
 
-  test("sets isFork: false for same-repository PRs", async () => {
+  test("sets isCrossRepository: false for same-repository PRs", async () => {
     const result = await prStrategy.resolve("43", "/repo", "main", mockRunner(false));
-    expect(result.isFork).toBe(false);
+    expect(result.isCrossRepository).toBe(false);
   });
 });
