@@ -67,18 +67,13 @@ export async function resolveCredentials(
       join(homeDir, ".claude.json"),
       join(homeDir, ".config", "claude", "config.json"),
       join(homeDir, ".claude", ".credentials.json"),
-
     ];
     for (const candidatePath of candidatePaths) {
       try {
-        const f = Bun.file(candidatePath);
-        if (await f.exists()) {
-          const creds = JSON.parse(await f.text());
-          const accessToken = creds?.claudeAiOauth?.accessToken;
-          if (typeof accessToken === "string" && accessToken.length > 0) {
-            process.env.CLAUDE_CODE_OAUTH_TOKEN = accessToken;
-            break;
-          }
+        const token = JSON.parse(await Bun.file(p).text())?.claudeAiOauth?.accessToken;
+        if (typeof token === "string" && token.length > 0) {
+          process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
+          break;
         }
       } catch { /* ignore — file absent or malformed */ }
     }
