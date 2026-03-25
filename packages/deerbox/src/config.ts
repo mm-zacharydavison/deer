@@ -50,9 +50,18 @@ export interface DeerConfig {
   experimental?: {
     /**
      * Start generating PR metadata speculatively while the user reads the
-     * post-session menu. Hides most of the Claude inference latency on the
-     * happy path (user picks "p"). Incurs an extra Claude API call if the
-     * user picks any other option.
+     * post-session menu. Hides most Claude inference latency on the happy paths.
+     *
+     * Per-option behaviour:
+     * - `p` (create/update PR): metadata reused — **no extra call** (happy path)
+     * - `m` (merge into branch): metadata reused for commit message — **no extra call**
+     * - `k` (keep worktree): metadata generated then discarded — **wasted call**
+     * - `s` (open shell): metadata generated then discarded — **wasted call**
+     * - `d` (discard): metadata generated then discarded — **wasted call**
+     *
+     * Note: metadata is generated before `stageAndCommit` runs, but
+     * `generatePRMetadata` includes `git diff HEAD` to capture uncommitted
+     * changes alongside the committed diff, so the result is complete.
      * @default false
      */
     speculativeClose?: boolean;

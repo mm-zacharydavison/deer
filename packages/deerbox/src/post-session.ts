@@ -227,6 +227,7 @@ export async function runPostSession(
         targetBranch: ctx.originalBranch,
         prompt: ctx.prompt,
         onLog: (msg) => deps.log(`  ${msg}`),
+        speculativeMetadata,
       });
       deps.log(`\n${green("Merged into")} ${ctx.originalBranch}`);
       await deps.destroy();
