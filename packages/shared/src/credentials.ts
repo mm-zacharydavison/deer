@@ -70,7 +70,7 @@ export async function resolveCredentials(
     ];
     for (const candidatePath of candidatePaths) {
       try {
-        const token = JSON.parse(await Bun.file(p).text())?.claudeAiOauth?.accessToken;
+        const token = JSON.parse(await Bun.file(candidatePath).text())?.claudeAiOauth?.accessToken;
         if (typeof token === "string" && token.length > 0) {
           process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
           break;
