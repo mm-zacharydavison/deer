@@ -73,6 +73,11 @@ export interface PostSessionContext {
    */
   fromPrUrl?: string;
   /**
+   * True when fromPrUrl is a fork PR (isCrossRepository). When set, changes
+   * are committed locally only — no push and no PR title/body update.
+   */
+  fromPrIsFork?: boolean;
+  /**
    * The branch the user was on when they invoked deerbox. When set, the 'm'
    * menu option merges the session branch into this branch.
    */
@@ -143,6 +148,7 @@ export async function runPostSession(
           baseBranch: ctx.baseBranch,
           prompt: ctx.prompt,
           prUrl: ctx.fromPrUrl,
+          isFork: ctx.fromPrIsFork,
           onLog: (msg) => deps.log(`  ${msg}`),
         });
         deps.log(`\n${green("PR updated:")} ${ctx.fromPrUrl}`);

@@ -64,3 +64,28 @@ describe("resolveFrom dispatch", () => {
     ).rejects.toThrow();
   });
 });
+
+// ── prStrategy.resolve: isFork detection ─────────────────────────────
+
+describe("prStrategy.resolve isFork", () => {
+  const mockRunner = (isCrossRepository: boolean): GhRunner =>
+    async () => ({
+      stdout: JSON.stringify({
+        headRefName: "fix-bug",
+        url: "https://github.com/org/repo/pull/42",
+        baseRefName: "main",
+        isCrossRepository,
+      }),
+      exitCode: 0,
+    });
+
+  test("sets isFork: true for cross-repository (fork) PRs", async () => {
+    const result = await prStrategy.resolve("42", "/repo", "main", mockRunner(true));
+    expect(result.isFork).toBe(true);
+  });
+
+  test("sets isFork: false for same-repository PRs", async () => {
+    const result = await prStrategy.resolve("43", "/repo", "main", mockRunner(false));
+    expect(result.isFork).toBe(false);
+  });
+});

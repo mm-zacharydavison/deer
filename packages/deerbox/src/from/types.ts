@@ -20,6 +20,11 @@ export interface FromResolution {
   baseBranch: string;
   /** Additional context to inject into Claude's system prompt (e.g. CI logs, PR comments) */
   appendSystemPrompt?: string;
+  /**
+   * True when the PR originates from a fork (isCrossRepository in GitHub API).
+   * When true, changes are committed locally only — the fork remote cannot be pushed to.
+   */
+  isFork?: boolean;
 }
 
 /** A strategy that can resolve a --from value. */

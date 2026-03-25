@@ -256,6 +256,7 @@ async function cmdRun(prompt: string | undefined, args: string[]) {
       baseBranch: postSessionBaseBranch,
       prompt: prompt ?? null,
       fromPrUrl: fromPrUrl ?? undefined,
+      fromPrIsFork: fromResolution?.isFork,
       originalBranch,
     },
     {
