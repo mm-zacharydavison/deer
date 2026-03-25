@@ -256,11 +256,12 @@ async function cmdRun(prompt: string | undefined, args: string[]) {
       baseBranch: postSessionBaseBranch,
       prompt: prompt ?? null,
       fromPrUrl: fromPrUrl ?? undefined,
+      fromPrIsFork: fromResolution?.isCrossRepository,
       originalBranch,
     },
     {
       hasChanges: (wt, base) => hasChanges(wt, base, initialHeadSha),
-      promptChoice: () => interactivePromptChoice(fromPrUrl ?? undefined, originalBranch),
+      promptChoice: () => interactivePromptChoice(fromPrUrl ?? undefined, originalBranch, fromResolution?.isCrossRepository),
       createPR: createPullRequest,
       updatePR: (opts) => updatePullRequest(opts),
       mergeBranch: defaultMergeBranch,

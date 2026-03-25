@@ -23,11 +23,11 @@ export const prStrategy: FromStrategy = {
   },
 
   async resolve(from: string, repoPath: string, defaultBranch: string, runner: GhRunner = defaultRunner): Promise<FromResolution> {
-    const result = await runner(["pr", "view", from, "--json", "headRefName,url,baseRefName"]);
+    const result = await runner(["pr", "view", from, "--json", "headRefName,url,baseRefName,isCrossRepository"]);
     if (result.exitCode !== 0) {
       throw new Error(`Could not find PR: ${from}`);
     }
-    const data = JSON.parse(result.stdout) as { headRefName: string; url: string; baseRefName: string };
+    const data = JSON.parse(result.stdout) as { headRefName: string; url: string; baseRefName: string; isCrossRepository: boolean };
 
     // Fetch PR review comments and format as system prompt context
     let appendSystemPrompt: string | undefined;
@@ -47,6 +47,7 @@ export const prStrategy: FromStrategy = {
       branch: data.headRefName,
       prUrl: data.url,
       baseBranch: data.baseRefName,
+      isCrossRepository: data.isCrossRepository,
       appendSystemPrompt,
     };
   },
