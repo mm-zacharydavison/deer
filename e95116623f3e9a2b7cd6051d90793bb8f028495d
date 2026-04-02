@@ -1,0 +1,29 @@
+test/ecosystems/npm.test.ts
+  6564c669cf87f6df 1-76
+packages/deerbox/src/sandbox/srt.ts
+  6564c669cf87f6df 154
+test/ecosystems/pnpm.test.ts
+  6564c669cf87f6df 1-76
+packages/deerbox/src/ecosystems.ts
+  6564c669cf87f6df 59,77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.4",
+  "base_commit_sha": "e95116623f3e9a2b7cd6051d90793bb8f028495d",
+  "prompts": {
+    "6564c669cf87f6df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6af2d86-15ba-48ce-ba28-76255cffb6c2",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "deer-agent",
+      "messages": [],
+      "total_additions": 223,
+      "total_deletions": 0,
+      "accepted_lines": 155,
+      "overriden_lines": 0
+    }
+  }
+}
