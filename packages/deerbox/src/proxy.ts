@@ -2,8 +2,10 @@
  * Credential resolution for the MITM auth proxy.
  */
 
+import { join } from "node:path";
 import type { ProxyCredential } from "./config";
 import type { ProxyUpstream } from "./sandbox/auth-proxy";
+import { HOME } from "@deer/shared";
 
 /**
  * Resolve proxy credentials from config: read host env vars, build upstream
@@ -44,6 +46,26 @@ export function resolveProxyUpstreams(
       domain: cred.domain,
       target: cred.target,
       headers,
+      ...(cred.hostEnv.key === "CLAUDE_CODE_OAUTH_TOKEN" && {
+        oauthRefresh: {
+          sources: [
+            { type: "agent-token-file" as const, path: join(HOME, ".claude", "agent-oauth-token") },
+            ...(process.platform === "darwin"
+              ? [{ type: "keychain" as const, service: "Claude Code-credentials" }]
+              : []),
+            {
+              type: "file" as const,
+              paths: [
+                join(HOME, ".claude.json"),
+                join(HOME, ".config", "claude", "config.json"),
+                join(HOME, ".claude", ".credentials.json"),
+              ],
+            },
+          ],
+          headerName: "authorization",
+          headerTemplate: "Bearer ${token}",
+        },
+      }),
     });
 
     sandboxEnv[cred.sandboxEnv.key] = cred.sandboxEnv.value;
