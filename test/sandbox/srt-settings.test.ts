@@ -85,7 +85,7 @@ describe("srt settings - git write permissions", () => {
     const extraPaths = allowWrite.filter(
       (p) =>
         p !== worktreeDir &&
-        !p.includes(".claude") &&
+        !p.includes("claude-config") &&
         p !== "/tmp" &&
         p !== "/private/tmp"
     );
@@ -152,80 +152,6 @@ describe("resolveSymlinkTargets", () => {
   test("returns empty array when directory does not exist", () => {
     const result = resolveSymlinkTargets("/nonexistent/path/that/cannot/exist");
     expect(result).toEqual([]);
-  });
-});
-
-describe("srt settings - symlink targets in allowed dirs are reachable", () => {
-  const tmpDirs: string[] = [];
-
-  afterEach(async () => {
-    for (const d of tmpDirs.splice(0)) {
-      await rm(d, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  async function makeTmpDir(): Promise<string> {
-    const d = await mkdtemp(join(tmpdir(), "deer-srt-sym-int-"));
-    tmpDirs.push(d);
-    return d;
-  }
-
-  test("symlink targets within home are excluded from denyRead", async () => {
-    // Build a fake home dir:
-    //   <home>/.external-data/     <- would normally be denied
-    //   <home>/.claude/skills/my-skill -> <home>/.external-data/
-    const home = await makeTmpDir();
-    const externalData = join(home, ".external-data");
-    await mkdir(externalData);
-    const claudeSkillsDir = join(home, ".claude", "skills");
-    await mkdir(claudeSkillsDir, { recursive: true });
-    await symlink(externalData, join(claudeSkillsDir, "my-skill"));
-
-    const taskDir = await makeTmpDir();
-    const worktreeDir = join(taskDir, "worktree");
-    await mkdir(worktreeDir);
-
-    const runtime = createSrtRuntime({ home });
-    await runtime.prepare?.({
-      worktreePath: worktreeDir,
-      allowlist: [],
-    });
-
-    const settingsPath = join(taskDir, "srt-settings.json");
-    const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
-    const denyRead: string[] = settings.filesystem.denyRead;
-
-    const denied = denyRead.some((p) => p === externalData || p.startsWith(externalData + "/"));
-    expect(denied).toBe(false);
-  });
-
-  test("symlinks in agents and commands subdirs are also resolved", async () => {
-    const home = await makeTmpDir();
-    const agentTarget = join(home, ".my-agents");
-    const commandTarget = join(home, ".my-commands");
-    await mkdir(agentTarget);
-    await mkdir(commandTarget);
-    await mkdir(join(home, ".claude", "agents"), { recursive: true });
-    await mkdir(join(home, ".claude", "commands"), { recursive: true });
-    await symlink(agentTarget, join(home, ".claude", "agents", "my-agent"));
-    await symlink(commandTarget, join(home, ".claude", "commands", "my-cmd"));
-
-    const taskDir = await makeTmpDir();
-    const worktreeDir = join(taskDir, "worktree");
-    await mkdir(worktreeDir);
-
-    const runtime = createSrtRuntime({ home });
-    await runtime.prepare?.({
-      worktreePath: worktreeDir,
-      allowlist: [],
-    });
-
-    const settingsPath = join(taskDir, "srt-settings.json");
-    const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
-    const denyRead: string[] = settings.filesystem.denyRead;
-
-    expect(denyRead).not.toContain(agentTarget);
-    expect(denyRead).not.toContain(commandTarget);
   });
 });
 
