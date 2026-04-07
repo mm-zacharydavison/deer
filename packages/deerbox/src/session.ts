@@ -13,11 +13,10 @@ import { createWorktree, checkoutWorktree, removeWorktree, cleanupWorktree } fro
 import { generateTaskId, dataDir } from "./task";
 import { loadConfig, type DeerConfig } from "./config";
 import { resolveRuntime } from "./sandbox/resolve";
-import { detectLang, HOME } from "@deer/shared";
+import { detectLang, HOME, DEFAULT_MODEL } from "@deer/shared";
 import { applyEcosystems } from "./ecosystems";
 import { resolveProxyUpstreams } from "./proxy";
 import { startAuthProxy, type AuthProxy } from "./sandbox/auth-proxy";
-import { DEFAULT_MODEL } from "@deer/shared";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -148,16 +147,17 @@ export async function setupClaudeConfigDir(claudeConfigDir: string, home: string
   const hasClaudeJson = await access(hostClaudeJson).then(() => true).catch(() => false);
   if (hasClaudeJson) {
     const raw = await readFile(hostClaudeJson, "utf-8");
-    let parsed: Record<string, unknown>;
+    let parsed: Record<string, unknown> | null = null;
     try {
       parsed = JSON.parse(raw);
     } catch {
       // Unparseable — skip rather than crash the session
-      return;
     }
-    delete parsed.oauthToken;
-    delete parsed.apiKey;
-    await writeFile(join(claudeConfigDir, ".claude.json"), JSON.stringify(parsed, null, 2));
+    if (parsed !== null) {
+      delete parsed.oauthToken;
+      delete parsed.apiKey;
+      await writeFile(join(claudeConfigDir, ".claude.json"), JSON.stringify(parsed, null, 2));
+    }
   }
 }
 
