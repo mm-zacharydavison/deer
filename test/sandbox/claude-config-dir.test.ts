@@ -140,6 +140,20 @@ describe("setupClaudeConfigDir", () => {
     expect(content).toBe("#!/bin/sh");
   });
 
+  test("copies agents directory recursively when it exists", async () => {
+    const home = await makeHome();
+    const claudeDir = join(home, ".claude");
+    await mkdir(join(claudeDir, "agents"), { recursive: true });
+    await writeFile(join(claudeDir, "agents", "my-agent.md"), "# Agent");
+
+    const taskDir = await makeTaskDir();
+    const claudeConfigDir = join(taskDir, "claude-config");
+    await setupClaudeConfigDir(claudeConfigDir, home);
+
+    const content = await readFile(join(claudeConfigDir, "agents", "my-agent.md"), "utf-8");
+    expect(content).toBe("# Agent");
+  });
+
   test("skips items that do not exist in ~/.claude without error", async () => {
     const home = await makeHome();
     // No ~/.claude directory at all

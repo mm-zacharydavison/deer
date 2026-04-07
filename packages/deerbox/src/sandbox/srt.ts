@@ -219,6 +219,8 @@ function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | nu
       denyWrite: [
         join(home, ".claude"),
         join(home, ".claude.json"),
+        join(claudeConfigDir, ".credentials.json"),
+        join(claudeConfigDir, "agent-oauth-token"),
       ],
     },
     // Claude Code runs interactively and needs setRawMode (tcsetattr)

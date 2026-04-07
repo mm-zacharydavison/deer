@@ -111,6 +111,7 @@ const CLAUDE_DIR_ITEMS: Array<{ name: string; isDir: boolean }> = [
   { name: "settings.json", isDir: false },
   { name: "settings.local.json", isDir: false },
   { name: "commands", isDir: true },
+  { name: "agents", isDir: true },
   { name: "plugins", isDir: true },
   { name: "skills", isDir: true },
   { name: "hooks", isDir: true },
