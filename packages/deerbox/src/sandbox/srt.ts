@@ -1,5 +1,5 @@
 import { join, dirname } from "node:path";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { SandboxRuntime, SandboxRuntimeOptions, SandboxCleanup } from "./runtime";
 import { HOME } from "@deer/shared";
@@ -48,9 +48,9 @@ function resolveSrtBin(): string {
  *   Any HOME entry that is an ancestor of a required path is excluded
  *   from the deny list.
  */
-function buildHomeDenyList(requiredPaths: string[]): string[] {
-  // Extract the first path component under HOME for each required path
-  const homePrefix = HOME.endsWith("/") ? HOME : HOME + "/";
+function buildHomeDenyList(requiredPaths: string[], home: string): string[] {
+  // Extract the first path component under home for each required path
+  const homePrefix = home.endsWith("/") ? home : home + "/";
   const requiredRoots = new Set<string>();
   for (const p of requiredPaths) {
     if (p.startsWith(homePrefix)) {
@@ -61,22 +61,22 @@ function buildHomeDenyList(requiredPaths: string[]): string[] {
   }
 
   try {
-    const entries = readdirSync(HOME);
+    const entries = readdirSync(home);
     return entries
       .filter((name) => !name.startsWith(".claude") && name !== ".mcp.json" && !requiredRoots.has(name))
-      .map((name) => join(HOME, name));
+      .map((name) => join(home, name));
   } catch {
-    // Fallback to known sensitive paths if HOME is unreadable
+    // Fallback to known sensitive paths if home is unreadable
     return [
-      join(HOME, ".ssh"),
-      join(HOME, ".aws"),
-      join(HOME, ".azure"),
-      join(HOME, ".config"),
-      join(HOME, ".docker"),
-      join(HOME, ".kube"),
-      join(HOME, ".npmrc"),
-      join(HOME, ".pypirc"),
-      join(HOME, ".git-credentials"),
+      join(home, ".ssh"),
+      join(home, ".aws"),
+      join(home, ".azure"),
+      join(home, ".config"),
+      join(home, ".docker"),
+      join(home, ".kube"),
+      join(home, ".npmrc"),
+      join(home, ".pypirc"),
+      join(home, ".git-credentials"),
     ].filter((p) => {
       const name = p.slice(homePrefix.length).split("/")[0];
       return !requiredRoots.has(name ?? "");
@@ -106,10 +106,46 @@ function resolveWorktreeGitDir(worktreePath: string): string | null {
 }
 
 /**
+ * Resolve real filesystem paths behind symlinks within a directory tree.
+ *
+ * Scans `dir` and all of its immediate subdirectories for symlinks and
+ * returns their resolved real paths. This ensures tools (skills, agents,
+ * commands, or any other extension) symlinked from within ~/.claude/ to
+ * paths outside ~/.claude/ are included in the sandbox's allowed paths.
+ *
+ * @param dir - Root directory to scan (typically ~/.claude)
+ */
+export function resolveSymlinkTargets(dir: string): string[] {
+  const paths: string[] = [];
+
+  function scanDir(scanPath: string, recurse: boolean): void {
+    try {
+      const entries = readdirSync(scanPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isSymbolicLink()) {
+          try {
+            paths.push(realpathSync(join(scanPath, entry.name)));
+          } catch {
+            // Unresolvable symlink — skip
+          }
+        } else if (recurse && entry.isDirectory()) {
+          scanDir(join(scanPath, entry.name), false);
+        }
+      }
+    } catch {
+      // Unreadable or nonexistent directory — skip
+    }
+  }
+
+  scanDir(dir, true);
+  return paths;
+}
+
+/**
  * Build an SRT settings JSON object from deer's sandbox options.
  */
-function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | null): Record<string, unknown> {
-  const claudeDir = join(HOME, ".claude");
+function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | null, home: string): Record<string, unknown> {
+  const claudeDir = join(home, ".claude");
 
   const network: Record<string, unknown> = {
     allowedDomains: options.allowlist,
@@ -144,19 +180,22 @@ function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | nu
   }
 
   // Collect paths that must stay readable: worktree, repo .git dir,
-  // PATH entries under HOME, and the deer data dir (worktree parent).
+  // PATH entries under home, the deer data dir (worktree parent), and
+  // real paths behind any symlinks within ~/.claude/ so that tools
+  // symlinked from external locations remain accessible in the sandbox.
   const requiredPaths = [
     options.worktreePath,
     dirname(options.worktreePath),
     ...(options.repoGitDir ? [options.repoGitDir] : []),
-    ...(process.env.PATH?.split(":").filter((p) => p.startsWith(HOME)) ?? []),
+    ...(process.env.PATH?.split(":").filter((p) => p.startsWith(home)) ?? []),
     ...(srtBinDir ? [srtBinDir] : []),
     ...(options.extraReadPaths ?? []),
+    ...resolveSymlinkTargets(claudeDir),
   ];
 
-  // Deny read access to all HOME entries except .claude* and required roots.
+  // Deny read access to all home entries except .claude* and required roots.
   // Dynamically enumerated so new dotfiles/dirs are automatically blocked.
-  const denyRead = buildHomeDenyList(requiredPaths);
+  const denyRead = buildHomeDenyList(requiredPaths, home);
 
   return {
     network,
@@ -168,7 +207,7 @@ function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | nu
         // subdirectories needed for git add (objects) and commit (refs).
         ...gitWritePaths,
         claudeDir,
-        join(HOME, ".claude.json"),
+        join(home, ".claude.json"),
         "/tmp",
         "/private/tmp",
         ...(options.extraWritePaths ?? []),
@@ -197,22 +236,19 @@ function shellq(s: string): string {
  * This replaces the hand-rolled bwrap, seatbelt, and proxy implementations
  * with a single maintained library.
  */
-export function createSrtRuntime(): SandboxRuntime {
+export function createSrtRuntime(opts?: { home?: string }): SandboxRuntime {
+  const home = opts?.home ?? HOME;
   const srtBin = resolveSrtBin();
-  const srtBinDir = srtBin === "srt" ? null : dirname(dirname(srtBin)); // package root
+  const srtBinDir = srtBin === "srt" ? null : dirname(dirname(srtBin));
   let settingsPath = "";
 
   return {
     name: "srt",
 
     async prepare(options: SandboxRuntimeOptions): Promise<SandboxCleanup> {
-      const settings = buildSrtSettings(options, srtBinDir);
-
-      // Write settings file next to the worktree
+      const settings = buildSrtSettings(options, srtBinDir, home);
       settingsPath = join(dirname(options.worktreePath), "srt-settings.json");
       await Bun.write(settingsPath, JSON.stringify(settings, null, 2));
-
-      // srt manages its own proxy lifecycle — no host-side cleanup needed
       return () => {};
     },
 
@@ -228,7 +264,7 @@ export function createSrtRuntime(): SandboxRuntime {
         }
       }
 
-      envExports.push(`export HOME=${shellq(HOME)}`);
+      envExports.push(`export HOME=${shellq(home)}`);
       envExports.push("unset CLAUDECODE");
 
       if (process.env.PATH) {
@@ -240,10 +276,7 @@ export function createSrtRuntime(): SandboxRuntime {
 
       const shellCmd = `${envExports.join("; ")}; cd ${shellq(worktreePath)} && exec ${escapedInner}`;
 
-      return [
-        srtBin, "-s", settingsPath,
-        "-c", shellCmd,
-      ];
+      return [srtBin, "-s", settingsPath, "-c", shellCmd];
     },
   };
 }
