@@ -109,11 +109,11 @@ function resolveWorktreeGitDir(worktreePath: string): string | null {
  * Resolve real filesystem paths behind symlinks within a directory tree.
  *
  * Scans `dir` and all of its immediate subdirectories for symlinks and
- * returns their resolved real paths. This ensures tools (skills, agents,
- * commands, or any other extension) symlinked from within ~/.claude/ to
- * paths outside ~/.claude/ are included in the sandbox's allowed paths.
+ * returns their resolved real paths. This ensures symlinked tools
+ * (skills, agents, commands, or any other extension) are included in
+ * the sandbox's allowed paths.
  *
- * @param dir - Root directory to scan (typically ~/.claude)
+ * @param dir - Root directory to scan
  */
 export function resolveSymlinkTargets(dir: string): string[] {
   const paths: string[] = [];
