@@ -188,6 +188,7 @@ function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | nu
     ...(process.env.PATH?.split(":").filter((p) => p.startsWith(home)) ?? []),
     ...(srtBinDir ? [srtBinDir] : []),
     ...(options.extraReadPaths ?? []),
+    ...resolveSymlinkTargets(claudeConfigDir),
   ];
 
   // Deny read access to all home entries except required roots.
