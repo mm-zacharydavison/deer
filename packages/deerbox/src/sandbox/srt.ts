@@ -1,5 +1,5 @@
 import { join, dirname } from "node:path";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { SandboxRuntime, SandboxRuntimeOptions, SandboxCleanup } from "./runtime";
 import { HOME } from "@deer/shared";
@@ -106,6 +106,34 @@ function resolveWorktreeGitDir(worktreePath: string): string | null {
 }
 
 /**
+ * Resolve the real filesystem paths behind any symlinks in ~/.claude/skills/.
+ *
+ * Skills installed via git-ai or other tools are often symlinked from
+ * ~/.claude/skills/ into a directory outside ~/.claude/ (e.g. ~/.git-ai/skills/).
+ * Those symlink targets are blocked by buildHomeDenyList unless we explicitly
+ * include them in requiredPaths.
+ */
+function resolveSkillSymlinkTargets(): string[] {
+  const skillsDir = join(HOME, ".claude", "skills");
+  try {
+    const entries = readdirSync(skillsDir, { withFileTypes: true });
+    const paths: string[] = [];
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) {
+        try {
+          paths.push(realpathSync(join(skillsDir, entry.name)));
+        } catch {
+          // Unresolvable symlink — skip
+        }
+      }
+    }
+    return paths;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Build an SRT settings JSON object from deer's sandbox options.
  */
 function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | null): Record<string, unknown> {
@@ -144,7 +172,9 @@ function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | nu
   }
 
   // Collect paths that must stay readable: worktree, repo .git dir,
-  // PATH entries under HOME, and the deer data dir (worktree parent).
+  // PATH entries under HOME, the deer data dir (worktree parent), and
+  // any real paths behind symlinks in ~/.claude/skills/ (skills installed
+  // via external tools like git-ai are symlinked outside ~/.claude/).
   const requiredPaths = [
     options.worktreePath,
     dirname(options.worktreePath),
@@ -152,6 +182,7 @@ function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | nu
     ...(process.env.PATH?.split(":").filter((p) => p.startsWith(HOME)) ?? []),
     ...(srtBinDir ? [srtBinDir] : []),
     ...(options.extraReadPaths ?? []),
+    ...resolveSkillSymlinkTargets(),
   ];
 
   // Deny read access to all HOME entries except .claude* and required roots.
