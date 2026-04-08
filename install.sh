@@ -99,6 +99,10 @@ for bin in deer deerbox; do
   info "Downloading ${bin}..."
   download "$url" "$dest" || die "Download failed for ${bin}. URL: ${url}"
   chmod +x "$dest"
+  # macOS: re-sign adhoc so the kernel accepts the binary after download
+  if [ "$OS" = "darwin" ] && command -v codesign >/dev/null 2>&1; then
+    codesign --force --sign - "$dest" 2>/dev/null || true
+  fi
   ok "  Installed: ${dest}"
 done
 

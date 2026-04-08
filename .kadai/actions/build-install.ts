@@ -26,6 +26,10 @@ for (const bin of binaries) {
   const installPath = join(installDir, bin.name);
   await $`cp ${bin.built} ${installPath}`.quiet();
   await $`chmod +x ${installPath}`.quiet();
+  // macOS: cp invalidates the adhoc code signature — re-sign so the kernel doesn't SIGKILL it
+  if (os === "darwin") {
+    await $`codesign --force --sign - ${installPath}`.quiet();
+  }
   const sizeMB = ((await Bun.file(installPath).size) / 1024 / 1024).toFixed(1);
   console.log(`Installed ${installPath} (${sizeMB} MB)`);
 }
