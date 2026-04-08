@@ -200,12 +200,20 @@ function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | nu
     // the host-side MITM proxy.
     join(claudeConfigDir, ".credentials.json"),
     join(claudeConfigDir, "agent-oauth-token"),
+    // Block all sibling task directories. The tasks root (parent of the task
+    // dir) is readable via .local, so we must explicitly deny it and then
+    // re-allow only this task's own directory via allowRead below.
+    dirname(dirname(options.worktreePath)),
   ];
+
+  // Re-allow only this task's own directory within the denied tasks root.
+  const allowRead = [dirname(options.worktreePath)];
 
   return {
     network,
     filesystem: {
       denyRead,
+      allowRead,
       allowWrite: [
         options.worktreePath,
         // Per-worktree gitdir (.git/worktrees/<name>/) and shared git
