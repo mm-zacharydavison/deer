@@ -85,6 +85,8 @@ async function removeWorktreeAndBranch(
   opts: PruneOptions,
 ): Promise<void> {
   emit(`Removing worktree: ${worktreePath} (branch: ${branch})`, opts);
+  // worktreePath is always inside ~/.local/share/deer/tasks/ (deer-owned).
+  // Only delete the branch if it is a deer-created branch (deer/<taskId>).
   await Bun.$`git -C ${repoPath} worktree remove ${worktreePath} --force`.quiet().nothrow();
   if (branch.startsWith("deer/")) {
     await Bun.$`git -C ${repoPath} branch -D ${branch}`.quiet().nothrow();

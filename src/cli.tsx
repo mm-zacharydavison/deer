@@ -131,6 +131,22 @@ async function main() {
 
   await checkAndUpdateDeer();
 
+  // Prune dangling deer-created worktrees on startup (never force, only deer/ branches).
+  {
+    const tasks = getAllTasks();
+    for (const task of tasks) {
+      const isDangling =
+        TERMINAL_STATUSES.has(task.status) ||
+        !(await isTmuxSessionAlive(`deer-${task.task_id}`));
+      if (isDangling) deleteTaskRow(task.task_id);
+    }
+    const pruned = await prune({ force: false, log: () => {} });
+    if (pruned.tasksRemoved > 0) {
+      const w = pruned.worktreesRemoved;
+      console.error(`Pruned ${pruned.tasksRemoved} dangling task${pruned.tasksRemoved === 1 ? "" : "s"}${w > 0 ? ` (${w} worktree${w === 1 ? "" : "s"} removed)` : ""}`);
+    }
+  }
+
   const startDir = process.cwd();
 
   let repoRoot: string;
