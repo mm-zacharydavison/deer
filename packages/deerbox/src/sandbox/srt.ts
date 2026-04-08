@@ -1,5 +1,6 @@
 import { join, dirname, basename } from "node:path";
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
+import { resolveSecurityStrategy } from "./security";
 import { createRequire } from "node:module";
 import type { SandboxRuntime, SandboxRuntimeOptions, SandboxCleanup } from "./runtime";
 import { HOME } from "@deer/shared";
@@ -238,6 +239,9 @@ function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | nu
     // from different repos can't read each other. Tasks within the same
     // repo remain visible to each other.
     ...buildSiblingRepoDenyList(options.worktreePath),
+    // Additional paths from the active security strategy (empty for "default",
+    // system credential files + other users + password manager dirs for "high").
+    ...resolveSecurityStrategy(options.security ?? "default").extraDenyRead(home),
   ];
 
   return {
@@ -300,28 +304,29 @@ export function createSrtRuntime(opts?: { home?: string }): SandboxRuntime {
     },
 
     buildCommand(options: SandboxRuntimeOptions, innerCommand: string[]): string[] {
-      const { worktreePath, env } = options;
+      const { worktreePath, env, security = "default" } = options;
 
-      // Build env exports + cd + exec
-      const envExports: string[] = [];
+      // Filter credential vars from host env, then overlay the explicit sandbox
+      // env (proxy vars, git config, etc.) which always wins. This ensures user
+      // tool vars (GOPATH, UV_CACHE_DIR, NODE_ENV, …) pass through while
+      // credential vars are stripped per the active security strategy.
+      const filteredHost = resolveSecurityStrategy(security).filterEnv(process.env);
+      const mergedEnv: Record<string, string> = {
+        ...filteredHost,
+        ...(env ?? {}),
+        HOME: home,
+        PATH: process.env.PATH ?? "/usr/bin:/bin:/usr/local/bin",
+        TERM: process.env.TERM ?? "xterm-256color",
+      };
+      // Must never be set inside the sandbox
+      delete mergedEnv["CLAUDECODE"];
 
-      if (env) {
-        for (const [key, value] of Object.entries(env)) {
-          envExports.push(`export ${key}=${shellq(value)}`);
-        }
-      }
-
-      envExports.push(`export HOME=${shellq(home)}`);
-      envExports.push("unset CLAUDECODE");
-
-      if (process.env.PATH) {
-        envExports.push(`export PATH=${shellq(process.env.PATH)}`);
-      }
-      envExports.push(`export TERM=${shellq(process.env.TERM ?? "xterm-256color")}`);
-
+      // Use exec env -i to replace the inherited environment entirely with the
+      // merged set. This prevents any credential vars that leaked into the SRT
+      // process's inherited env from reaching the inner command.
+      const envAssigns = Object.entries(mergedEnv).map(([k, v]) => `${k}=${shellq(v)}`);
       const escapedInner = innerCommand.map(shellq).join(" ");
-
-      const shellCmd = `${envExports.join("; ")}; cd ${shellq(worktreePath)} && exec ${escapedInner}`;
+      const shellCmd = `cd ${shellq(worktreePath)} && exec env -i ${envAssigns.join(" ")} ${escapedInner}`;
 
       return [srtBin, "-s", settingsPath, "-c", shellCmd];
     },

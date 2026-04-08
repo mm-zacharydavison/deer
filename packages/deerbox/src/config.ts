@@ -3,6 +3,18 @@ import { join } from "node:path";
 import { HOME } from "@deer/shared";
 
 /**
+ * Sandbox security level controlling credential filtering of the host environment.
+ *
+ * - `"default"` — strips a curated list of exact well-known credential env var names
+ * - `"high"` — additionally strips any env var whose name matches credential keyword
+ *   patterns (e.g. `*_TOKEN`, `*_SECRET`, `*_PASSWORD`); prints a sandbox visibility
+ *   report at startup showing every env var and denyRead path visible to the sandbox
+ *
+ * @default "default"
+ */
+export type SecurityLevel = "default" | "high";
+
+/**
  * Maps a host env var to auth headers injected by the host-side MITM proxy.
  *
  * The sandbox never sees the real credential. SRT's proxy forwards matching
@@ -68,6 +80,11 @@ export interface DeerConfig {
      */
     proxyCredentials: ProxyCredential[];
     /**
+     * Sandbox security level.
+     * @default "default"
+     */
+    security: SecurityLevel;
+    /**
      * Ecosystem plugin configuration.
      */
     ecosystems?: {
@@ -99,6 +116,7 @@ export const DEFAULT_CONFIG: DeerConfig = {
   },
   sandbox: {
     runtime: "srt",
+    security: "default",
     envPassthrough: [],
     proxyCredentials: [
       {
@@ -285,6 +303,7 @@ function tomlToConfig(toml: Record<string, unknown>): Partial<DeerConfig> {
   if (sandbox) {
     result.sandbox = {
       ...(sandbox.runtime !== undefined && { runtime: sandbox.runtime }),
+      ...(sandbox.security !== undefined && { security: sandbox.security }),
       ...(sandbox.env_passthrough !== undefined && { envPassthrough: sandbox.env_passthrough }),
       ...(sandbox.proxy_credentials !== undefined && { proxyCredentials: sandbox.proxy_credentials }),
       ...(sandbox.ecosystems_disabled !== undefined && {

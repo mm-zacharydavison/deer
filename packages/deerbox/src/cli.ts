@@ -25,6 +25,7 @@ import { resolveCredentials } from "@deer/shared";
 import { killAuthProxy } from "./sandbox/auth-proxy";
 import { VERSION } from "./constants";
 import { DEFAULT_MODEL, setLang, detectLang, checkAndUpdate } from "@deer/shared";
+import type { SecurityLevel } from "./config";
 import { dataDir, repoSlug } from "./task";
 import { createPullRequest, updatePullRequest, hasChanges } from "./git/finalize";
 import { runPostSession, interactivePromptChoice, defaultOpenShell, defaultMergeBranch } from "./post-session";
@@ -43,6 +44,16 @@ function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
 }
 
+function parseSecurity(args: string[]): SecurityLevel | undefined {
+  const raw = getArg(args, "--security");
+  if (!raw) return undefined;
+  if (raw !== "default" && raw !== "high") {
+    console.error(`Invalid --security value: "${raw}". Must be "default" or "high".`);
+    process.exit(1);
+  }
+  return raw;
+}
+
 // ── Subcommand: prepare ──────────────────────────────────────────────
 
 async function cmdPrepare(args: string[]) {
@@ -55,6 +66,7 @@ async function cmdPrepare(args: string[]) {
   const continueTaskId = getArg(args, "--continue-task-id");
   const continueWorktree = getArg(args, "--continue-worktree");
   const continueBranch = getArg(args, "--continue-branch");
+  const security = parseSecurity(args);
 
   if (!repoPath || !baseBranch) {
     console.error("Usage: deerbox prepare --repo-path <path> --base-branch <branch> [--prompt <prompt>]");
@@ -77,17 +89,22 @@ async function cmdPrepare(args: string[]) {
     model,
     taskId,
     continueSession,
+    security,
     daemonize: true,
     onStatus: (msg) => console.error(msg),
   });
 
-  const result = {
+  const result: Record<string, unknown> = {
     taskId: session.taskId,
     worktreePath: session.worktreePath,
     branch: session.branch,
     command: session.command,
     authProxyPid: session.authProxyPid,
   };
+
+  if (session.securityReport !== null) {
+    result.securityReport = session.securityReport;
+  }
 
   console.log(JSON.stringify(result));
 }
@@ -167,6 +184,7 @@ async function cmdRun(prompt: string | undefined, args: string[]) {
   const baseBranch = getArg(args, "--base-branch") ?? getArg(args, "-b");
   const from = getArg(args, "--from") ?? getArg(args, "-f");
   const keep = hasFlag(args, "--keep") || hasFlag(args, "-k");
+  const security = parseSecurity(args);
 
   const startDir = process.cwd();
   let repoPath: string;
@@ -239,6 +257,7 @@ async function cmdRun(prompt: string | undefined, args: string[]) {
     config,
     model,
     reuseWorktree,
+    security,
     appendSystemPrompt: fromResolution?.appendSystemPrompt,
     onStatus: (msg) => console.error(`  ${msg}`),
   });
@@ -319,6 +338,10 @@ Interactive options:
   -b, --base-branch <branch>    Branch to base the worktree on
   -f, --from <source>           Start from a branch, PR (URL/#), or GitHub Actions URL
   -k, --keep                    Keep worktree after Claude exits
+      --security <level>        Sandbox security level: "default" or "high"
+                                default: strip known credential env var names
+                                high:    also strip *_TOKEN/*_SECRET/*_PASSWORD patterns;
+                                         print sandbox env and denyRead paths at startup
 
 Prune options:
   --force                       Kill all processes/sessions and wipe all task data
@@ -360,7 +383,7 @@ async function main() {
   const positional: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--model" || arg === "-m" || arg === "--base-branch" || arg === "-b" || arg === "--from" || arg === "-f") {
+    if (arg === "--model" || arg === "-m" || arg === "--base-branch" || arg === "-b" || arg === "--from" || arg === "-f" || arg === "--security") {
       i++; // skip value
     } else if (arg === "--keep" || arg === "-k") {
       // flag

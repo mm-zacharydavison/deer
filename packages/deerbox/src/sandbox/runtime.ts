@@ -1,3 +1,5 @@
+import type { SecurityLevel } from "../config";
+
 /**
  * Abstract sandbox runtime interface.
  *
@@ -38,6 +40,11 @@ export interface SandboxRuntimeOptions {
    * @example "/home/user/.local/share/deer/tasks/deer_abc123/claude-config"
    */
   claudeConfigDir?: string;
+  /**
+   * Sandbox security level controlling host environment variable filtering.
+   * @default "default"
+   */
+  security?: SecurityLevel;
 }
 
 /** Cleanup function returned by prepare() to tear down runtime resources */
