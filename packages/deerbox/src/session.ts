@@ -13,7 +13,7 @@ import { createWorktree, checkoutWorktree, removeWorktree, cleanupWorktree } fro
 import { generateTaskId, dataDir, repoSlug } from "./task";
 import { loadConfig, type DeerConfig } from "./config";
 import { resolveRuntime } from "./sandbox/resolve";
-import { detectLang, HOME, DEFAULT_MODEL, loadEnvPolicy, applyEnvPolicy } from "@deer/shared";
+import { detectLang, HOME, DEFAULT_MODEL, loadEnvPolicy } from "@deer/shared";
 import { applyEcosystems } from "./ecosystems";
 import { resolveProxyUpstreams } from "./proxy";
 import { startAuthProxy, type AuthProxy } from "./sandbox/auth-proxy";

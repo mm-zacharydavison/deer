@@ -323,33 +323,34 @@ export function createSrtRuntime(opts?: { home?: string }): SandboxRuntime {
     buildCommand(options: SandboxRuntimeOptions, innerCommand: string[]): string[] {
       const { worktreePath, env } = options;
 
-      // Spread host env, then overlay explicit sandbox env (proxy placeholders,
-      // git config, etc.). Proxy-injected credentials (e.g. ANTHROPIC_API_KEY)
-      // are redacted to "proxy-managed" via placeholderEnv in the env overlay,
-      // so the real values never reach the sandbox.
+      // Build explicit env overlay: proxy placeholders, git config, etc.
+      // Credential vars (e.g. ANTHROPIC_API_KEY) are redacted to "proxy-managed"
+      // via placeholderEnv so the real values never reach the sandbox.
       const mergedEnv: Record<string, string> = {};
-      for (const [k, v] of Object.entries(process.env)) {
-        if (v !== undefined) mergedEnv[k] = v;
+      if (env) {
+        Object.assign(mergedEnv, env);
       }
-      // Remove user-blocked vars before the explicit env overlay.
-      // The overlay is applied after, so proxy-managed placeholders
-      // (e.g. ANTHROPIC_API_KEY=proxy-managed) are unaffected.
-      for (const key of options.envBlocklist ?? []) {
-        delete mergedEnv[key];
-      }
-      Object.assign(mergedEnv, env ?? {});
       mergedEnv.HOME = home;
       mergedEnv.PATH = process.env.PATH ?? "/usr/bin:/bin:/usr/local/bin";
       mergedEnv.TERM = process.env.TERM ?? "xterm-256color";
-      // Must never be set inside the sandbox
-      delete mergedEnv["CLAUDECODE"];
 
-      // Use exec env -i to replace the inherited environment entirely with the
-      // merged set. This prevents any credential vars that leaked into the SRT
-      // process's inherited env from reaching the inner command.
-      const envAssigns = Object.entries(mergedEnv).map(([k, v]) => `${k}=${shellq(v)}`);
+      // Vars to explicitly remove from the sandbox environment.
+      // CLAUDECODE must never be set (prevents nested deer detection).
+      // User-blocked vars are removed via the env policy blocklist.
+      const unsetVars = new Set<string>(["CLAUDECODE"]);
+      for (const key of options.envBlocklist ?? []) {
+        unsetVars.add(key);
+      }
+
+      // Use export statements to set our vars on top of SRT's inherited env.
+      // SRT injects HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, no_proxy, etc. into
+      // the sandbox shell — using `env -i` would strip those and break networking.
+      // Export-based approach preserves SRT's proxy vars while overriding
+      // credentials with proxy-managed placeholders.
+      const exports = Object.entries(mergedEnv).map(([k, v]) => `export ${k}=${shellq(v)}`);
+      const unsets = [...unsetVars].map((k) => `unset ${k}`);
       const escapedInner = innerCommand.map(shellq).join(" ");
-      const shellCmd = `cd ${shellq(worktreePath)} && exec env -i ${envAssigns.join(" ")} ${escapedInner}`;
+      const shellCmd = `${[...exports, ...unsets].join("; ")}; cd ${shellq(worktreePath)} && exec ${escapedInner}`;
 
       return [srtBin, "-s", settingsPath, "-c", shellCmd];
     },
