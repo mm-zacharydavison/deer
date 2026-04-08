@@ -323,34 +323,31 @@ export function createSrtRuntime(opts?: { home?: string }): SandboxRuntime {
     buildCommand(options: SandboxRuntimeOptions, innerCommand: string[]): string[] {
       const { worktreePath, env } = options;
 
-      // Build explicit env overlay: proxy placeholders, git config, etc.
-      // Credential vars (e.g. ANTHROPIC_API_KEY) are redacted to "proxy-managed"
-      // via placeholderEnv so the real values never reach the sandbox.
-      const mergedEnv: Record<string, string> = {};
-      if (env) {
-        Object.assign(mergedEnv, env);
-      }
-      mergedEnv.HOME = home;
-      mergedEnv.PATH = process.env.PATH ?? "/usr/bin:/bin:/usr/local/bin";
-      mergedEnv.TERM = process.env.TERM ?? "xterm-256color";
+      // Build the sandbox env overlay. SRT injects proxy env vars
+      // (HTTP_PROXY, HTTPS_PROXY, etc.) before sandbox-exec, so we must NOT
+      // use `env -i` which would wipe them. Instead we overlay our vars and
+      // explicitly unset sensitive ones that shouldn't leak into the sandbox.
+      const overlay: Record<string, string> = {};
+      overlay.HOME = home;
+      overlay.PATH = process.env.PATH ?? "/usr/bin:/bin:/usr/local/bin";
+      overlay.TERM = process.env.TERM ?? "xterm-256color";
+      Object.assign(overlay, env ?? {});
 
       // Vars to explicitly remove from the sandbox environment.
       // CLAUDECODE must never be set (prevents nested deer detection).
       // User-blocked vars are removed via the env policy blocklist.
-      const unsetVars = new Set<string>(["CLAUDECODE"]);
+      const unsafeVars = new Set<string>(["CLAUDECODE"]);
       for (const key of options.envBlocklist ?? []) {
-        unsetVars.add(key);
+        unsafeVars.add(key);
       }
+      // Don't unset vars that the overlay explicitly sets (e.g. placeholder values)
+      const unsets = [...unsafeVars]
+        .filter((k) => !(k in (env ?? {})))
+        .map((k) => `-u ${k}`);
 
-      // Use export statements to set our vars on top of SRT's inherited env.
-      // SRT injects HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, no_proxy, etc. into
-      // the sandbox shell — using `env -i` would strip those and break networking.
-      // Export-based approach preserves SRT's proxy vars while overriding
-      // credentials with proxy-managed placeholders.
-      const exports = Object.entries(mergedEnv).map(([k, v]) => `export ${k}=${shellq(v)}`);
-      const unsets = [...unsetVars].map((k) => `unset ${k}`);
+      const envAssigns = Object.entries(overlay).map(([k, v]) => `${k}=${shellq(v)}`);
       const escapedInner = innerCommand.map(shellq).join(" ");
-      const shellCmd = `${[...exports, ...unsets].join("; ")}; cd ${shellq(worktreePath)} && exec ${escapedInner}`;
+      const shellCmd = `cd ${shellq(worktreePath)} && exec env ${unsets.join(" ")} ${envAssigns.join(" ")} ${escapedInner}`;
 
       return [srtBin, "-s", settingsPath, "-c", shellCmd];
     },
