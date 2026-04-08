@@ -55,7 +55,7 @@ export type { PruneResult, PruneOptions } from "./prune";
 
 // PR comments context
 export { fetchPRComments, formatPRComments } from "./pr-comments";
-export type { PRReviewComment, PRIssueComment, GhApiRunner, FetchPRCommentsResult } from "./pr-comments";
+export type { PRReviewComment, PRIssueComment, GhApiRunner, GhGraphqlRunner, ThreadStatusMap, FetchPRCommentsResult } from "./pr-comments";
 
 // --from resolution strategies
 export { resolveFrom, actionStrategy, prStrategy, branchStrategy } from "./from";
