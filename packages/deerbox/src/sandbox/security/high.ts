@@ -1,5 +1,3 @@
-import { join, dirname, basename } from "node:path";
-import { readdirSync } from "node:fs";
 import type { SecurityStrategy } from "./index";
 import { defaultSecurity } from "./default";
 
@@ -20,56 +18,25 @@ const CREDENTIAL_ENV_HIGH_PATTERN =
  * High security strategy.
  *
  * Env filtering: applies the default exact-name list, then additionally strips
- * any var whose name matches a credential keyword pattern ending.
+ * any var whose name matches a credential keyword pattern ending. An optional
+ * allowlist overrides blocked names at both levels.
  *
- * Filesystem extra denyRead:
- * - System credential files: /etc/shadow, /etc/sudoers, /etc/sudoers.d
- * - Root home: /root
- * - Other users' home directories under the same parent as $HOME
- * - Password manager data dirs under $HOME/.local/share (keyrings, gnome-keyring,
- *   pass, KeePassXC) — these sit inside the .local required root so are not
- *   covered by the standard home-directory enumeration
+ * Filesystem: delegates to defaultSecurity (system credential files, root home,
+ * other users' home dirs, password manager dirs).
  */
 export const highSecurity: SecurityStrategy = {
-  filterEnv(env) {
-    const base = defaultSecurity.filterEnv(env);
+  filterEnv(env, allowlist = []) {
+    const allowed = new Set(allowlist);
+    const base = defaultSecurity.filterEnv(env, allowlist);
     const result: Record<string, string> = {};
     for (const [key, value] of Object.entries(base)) {
-      if (CREDENTIAL_ENV_HIGH_PATTERN.test(key)) continue;
+      if (CREDENTIAL_ENV_HIGH_PATTERN.test(key) && !allowed.has(key)) continue;
       result[key] = value;
     }
     return result;
   },
 
   extraDenyRead(home) {
-    const denied: string[] = [
-      // System credential / privilege files
-      "/etc/shadow",
-      "/etc/sudoers",
-      "/etc/sudoers.d",
-      // Root's home directory
-      "/root",
-      // Sensitive dirs under .local/share — inside the required .local root
-      // so not reachable by the standard first-level $HOME enumeration
-      join(home, ".local", "share", "keyrings"),
-      join(home, ".local", "share", "gnome-keyring"),
-      join(home, ".local", "share", "pass"),
-      join(home, ".local", "share", "org.keepassxc.KeePassXC"),
-    ];
-
-    // Deny sibling home directories so other users' files are not reachable
-    const homeParent = dirname(home);
-    const currentUsername = basename(home);
-    if (homeParent !== home) {
-      try {
-        for (const name of readdirSync(homeParent)) {
-          if (name !== currentUsername) {
-            denied.push(join(homeParent, name));
-          }
-        }
-      } catch { /* non-standard home layout or unreadable parent */ }
-    }
-
-    return denied;
+    return defaultSecurity.extraDenyRead(home);
   },
 };

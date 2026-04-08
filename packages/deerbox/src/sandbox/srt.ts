@@ -304,13 +304,13 @@ export function createSrtRuntime(opts?: { home?: string }): SandboxRuntime {
     },
 
     buildCommand(options: SandboxRuntimeOptions, innerCommand: string[]): string[] {
-      const { worktreePath, env, security = "default" } = options;
+      const { worktreePath, env, security = "default", credentialEnvAllowlist } = options;
 
       // Filter credential vars from host env, then overlay the explicit sandbox
       // env (proxy vars, git config, etc.) which always wins. This ensures user
       // tool vars (GOPATH, UV_CACHE_DIR, NODE_ENV, …) pass through while
       // credential vars are stripped per the active security strategy.
-      const filteredHost = resolveSecurityStrategy(security).filterEnv(process.env);
+      const filteredHost = resolveSecurityStrategy(security).filterEnv(process.env, credentialEnvAllowlist);
       const mergedEnv: Record<string, string> = {
         ...filteredHost,
         ...(env ?? {}),

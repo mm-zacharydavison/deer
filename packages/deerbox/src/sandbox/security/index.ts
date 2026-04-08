@@ -15,8 +15,9 @@ export interface SecurityStrategy {
    * they hold credentials. Returns a new object; the input is not mutated.
    *
    * @param env - Source environment (typically `process.env`)
+   * @param allowlist - Env var names to pass through even if they match the blocked list
    */
-  filterEnv(env: Record<string, string | undefined>): Record<string, string>;
+  filterEnv(env: Record<string, string | undefined>, allowlist?: string[]): Record<string, string>;
 
   /**
    * Return additional filesystem paths to append to the sandbox's denyRead

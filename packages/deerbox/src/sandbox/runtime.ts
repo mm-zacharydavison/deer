@@ -45,6 +45,13 @@ export interface SandboxRuntimeOptions {
    * @default "default"
    */
   security?: SecurityLevel;
+  /**
+   * Env var names to pass through even if they appear in the blocked credential
+   * list. Combined with the built-in blocked list (allowlist wins).
+   * @default []
+   * @example ["GITHUB_TOKEN", "NPM_TOKEN"]
+   */
+  credentialEnvAllowlist?: string[];
 }
 
 /** Cleanup function returned by prepare() to tear down runtime resources */

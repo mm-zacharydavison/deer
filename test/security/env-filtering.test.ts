@@ -3,6 +3,7 @@
  *
  * default: strips curated exact-name credential list
  * high: additionally strips vars matching credential keyword patterns by name
+ * allowlist: user-specified env var names that bypass the blocked list
  */
 import { test, expect, describe } from "bun:test";
 import { defaultSecurity } from "../../packages/deerbox/src/sandbox/security/default";
@@ -18,7 +19,6 @@ describe("defaultSecurity.filterEnv", () => {
         AWS_ACCESS_KEY_ID: "AKIAIOSFODNN7EXAMPLE",
         AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         JWT_SECRET: "my-jwt-secret",
-        DATABASE_URL: "postgres://user:pass@host/db",
         PATH: "/usr/bin:/bin",
         GOPATH: "/home/user/go",
         NODE_ENV: "production",
@@ -31,11 +31,30 @@ describe("defaultSecurity.filterEnv", () => {
     expect(result.AWS_ACCESS_KEY_ID).toBeUndefined();
     expect(result.AWS_SECRET_ACCESS_KEY).toBeUndefined();
     expect(result.JWT_SECRET).toBeUndefined();
-    expect(result.DATABASE_URL).toBeUndefined();
 
     expect(result.PATH).toBe("/usr/bin:/bin");
     expect(result.GOPATH).toBe("/home/user/go");
     expect(result.NODE_ENV).toBe("production");
+  });
+
+  test("passes through local-service connection strings", () => {
+    const result = defaultSecurity.filterEnv({
+      DATABASE_URL: "postgres://user:pass@localhost:5432/mydb",
+      REDIS_URL: "redis://localhost:6379",
+      REDIS_PASSWORD: "localpass",
+      MONGO_URI: "mongodb://localhost:27017/mydb",
+      POSTGRES_PASSWORD: "localpass",
+      MYSQL_ROOT_PASSWORD: "localpass",
+      DB_PASSWORD: "localpass",
+    });
+
+    expect(result.DATABASE_URL).toBe("postgres://user:pass@localhost:5432/mydb");
+    expect(result.REDIS_URL).toBe("redis://localhost:6379");
+    expect(result.REDIS_PASSWORD).toBe("localpass");
+    expect(result.MONGO_URI).toBe("mongodb://localhost:27017/mydb");
+    expect(result.POSTGRES_PASSWORD).toBe("localpass");
+    expect(result.MYSQL_ROOT_PASSWORD).toBe("localpass");
+    expect(result.DB_PASSWORD).toBe("localpass");
   });
 
   test("preserves pattern-matched vars that are not in the exact list", () => {
@@ -57,6 +76,52 @@ describe("defaultSecurity.filterEnv", () => {
 
     expect(result.DEFINED).toBe("value");
     expect("UNDEFINED_VAR" in result).toBe(false);
+  });
+
+  test("allowlist restores vars that would otherwise be stripped", () => {
+    const result = defaultSecurity.filterEnv(
+      {
+        ANTHROPIC_API_KEY: "sk-ant-real",
+        GITHUB_TOKEN: "ghp_real",
+        NPM_TOKEN: "npm_real",
+        PATH: "/usr/bin:/bin",
+      },
+      ["GITHUB_TOKEN", "NPM_TOKEN"],
+    );
+
+    expect(result.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(result.GITHUB_TOKEN).toBe("ghp_real");
+    expect(result.NPM_TOKEN).toBe("npm_real");
+    expect(result.PATH).toBe("/usr/bin:/bin");
+  });
+
+  test("allowlist with unknown var names is a no-op", () => {
+    const result = defaultSecurity.filterEnv(
+      { PATH: "/usr/bin:/bin" },
+      ["NONEXISTENT_VAR"],
+    );
+
+    expect(result.PATH).toBe("/usr/bin:/bin");
+    expect("NONEXISTENT_VAR" in result).toBe(false);
+  });
+});
+
+describe("defaultSecurity.extraDenyRead", () => {
+  test("returns system credential files", () => {
+    const denied = defaultSecurity.extraDenyRead("/home/testuser");
+    expect(denied).toContain("/etc/shadow");
+    expect(denied).toContain("/etc/sudoers");
+    expect(denied).toContain("/etc/sudoers.d");
+    expect(denied).toContain("/root");
+  });
+
+  test("returns password manager dirs under .local/share", () => {
+    const home = "/home/testuser";
+    const denied = defaultSecurity.extraDenyRead(home);
+    expect(denied).toContain(`${home}/.local/share/keyrings`);
+    expect(denied).toContain(`${home}/.local/share/gnome-keyring`);
+    expect(denied).toContain(`${home}/.local/share/pass`);
+    expect(denied).toContain(`${home}/.local/share/org.keepassxc.KeePassXC`);
   });
 });
 
@@ -127,5 +192,29 @@ describe("highSecurity.filterEnv", () => {
     expect(result.TOKEN).toBeUndefined();
     expect(result.SECRET).toBeUndefined();
     expect(result.PASSWORD).toBeUndefined();
+  });
+
+  test("allowlist restores vars that would otherwise be stripped by pattern", () => {
+    const result = highSecurity.filterEnv(
+      {
+        MY_API_KEY: "custom-key",
+        CUSTOM_SECRET: "my-secret",
+        PATH: "/usr/bin:/bin",
+      },
+      ["MY_API_KEY"],
+    );
+
+    expect(result.MY_API_KEY).toBe("custom-key");
+    expect(result.CUSTOM_SECRET).toBeUndefined();
+    expect(result.PATH).toBe("/usr/bin:/bin");
+  });
+
+  test("extraDenyRead delegates to defaultSecurity", () => {
+    const home = "/home/testuser";
+    const highDenied = highSecurity.extraDenyRead(home);
+    const defaultDenied = defaultSecurity.extraDenyRead(home);
+    for (const path of defaultDenied) {
+      expect(highDenied).toContain(path);
+    }
   });
 });

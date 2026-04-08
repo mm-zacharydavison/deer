@@ -85,6 +85,15 @@ export interface DeerConfig {
      */
     security: SecurityLevel;
     /**
+     * Env var names to pass through into the sandbox even if they appear in the
+     * blocked credential list. Combined with the built-in blocked list (allowlist
+     * wins). Configured via `credential_env_allowlist` in deer.toml.
+     *
+     * @default []
+     * @example ["GITHUB_TOKEN", "NPM_TOKEN"]
+     */
+    credentialEnvAllowlist: string[];
+    /**
      * Ecosystem plugin configuration.
      */
     ecosystems?: {
@@ -117,6 +126,7 @@ export const DEFAULT_CONFIG: DeerConfig = {
   sandbox: {
     runtime: "srt",
     security: "default",
+    credentialEnvAllowlist: [],
     envPassthrough: [],
     proxyCredentials: [
       {
@@ -209,6 +219,12 @@ function applyRepoLocal(config: DeerConfig, repoLocal: Record<string, unknown>):
   }
 
   const sandbox = repoLocal.sandbox as Record<string, unknown> | undefined;
+  if (sandbox?.credential_env_allowlist && Array.isArray(sandbox.credential_env_allowlist)) {
+    result.sandbox.credentialEnvAllowlist = [
+      ...result.sandbox.credentialEnvAllowlist,
+      ...(sandbox.credential_env_allowlist as string[]),
+    ];
+  }
   if (sandbox?.env_passthrough_extra && Array.isArray(sandbox.env_passthrough_extra)) {
     result.sandbox.envPassthrough = [
       ...result.sandbox.envPassthrough,
@@ -304,6 +320,7 @@ function tomlToConfig(toml: Record<string, unknown>): Partial<DeerConfig> {
     result.sandbox = {
       ...(sandbox.runtime !== undefined && { runtime: sandbox.runtime }),
       ...(sandbox.security !== undefined && { security: sandbox.security }),
+      ...(sandbox.credential_env_allowlist !== undefined && { credentialEnvAllowlist: sandbox.credential_env_allowlist }),
       ...(sandbox.env_passthrough !== undefined && { envPassthrough: sandbox.env_passthrough }),
       ...(sandbox.proxy_credentials !== undefined && { proxyCredentials: sandbox.proxy_credentials }),
       ...(sandbox.ecosystems_disabled !== undefined && {

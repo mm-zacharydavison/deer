@@ -365,6 +365,7 @@ export async function prepare(options: PrepareOptions): Promise<PreparedSession>
     mitmProxy,
     claudeConfigDir,
     security,
+    credentialEnvAllowlist: config.sandbox.credentialEnvAllowlist,
   };
 
   try {
@@ -382,7 +383,7 @@ export async function prepare(options: PrepareOptions): Promise<PreparedSession>
   let securityReport: string | null = null;
   if (security === "high") {
     // Mirror the env merging that buildCommand will apply
-    const filteredHost = resolveSecurityStrategy(security).filterEnv(process.env);
+    const filteredHost = resolveSecurityStrategy(security).filterEnv(process.env, config.sandbox.credentialEnvAllowlist);
     const visibleEnv: Record<string, string> = {
       ...filteredHost,
       ...ecosystemResult.env,
