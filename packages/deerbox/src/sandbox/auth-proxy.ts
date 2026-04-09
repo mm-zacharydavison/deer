@@ -11,7 +11,7 @@
 
 import { spawn, execSync } from "node:child_process";
 import { join } from "node:path";
-import { mkdirSync, writeFileSync, existsSync, openSync, unlinkSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, openSync, unlinkSync, readFileSync, chmodSync, renameSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 import authProxySource from "./auth-proxy-server.mjs" with { type: "text" };
@@ -99,14 +99,21 @@ export function ensureCACert(dir: string): CACert {
 
   mkdirSync(dir, { recursive: true });
 
+  const tmpKeyPath = `${keyPath}.tmp`;
+  const tmpCertPath = `${certPath}.tmp`;
+
   execSync(
     `openssl req -x509 -new -nodes -newkey rsa:2048 ` +
-    `-keyout ${JSON.stringify(keyPath)} ` +
+    `-keyout ${JSON.stringify(tmpKeyPath)} ` +
     `-sha256 -days 3650 ` +
-    `-out ${JSON.stringify(certPath)} ` +
+    `-out ${JSON.stringify(tmpCertPath)} ` +
     `-subj "/CN=Deer Auth Proxy CA"`,
     { stdio: "ignore" },
   );
+
+  chmodSync(tmpKeyPath, 0o600);
+  renameSync(tmpKeyPath, keyPath);
+  renameSync(tmpCertPath, certPath);
 
   return { certPath, keyPath };
 }

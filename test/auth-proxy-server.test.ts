@@ -4,7 +4,7 @@ import { connect as netConnect, type Socket } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
-import { unlinkSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { unlinkSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 import { ensureCACert } from "../packages/deerbox/src/sandbox/auth-proxy";
 
@@ -394,8 +394,10 @@ describe("CA certificate", () => {
     expect(certPem).toContain("-----BEGIN CERTIFICATE-----");
 
     // Calling again should return same paths without regenerating
+    const certMtime = statSync(result.certPath).mtimeMs;
     const result2 = ensureCACert(dir);
     expect(result2.certPath).toBe(result.certPath);
+    expect(statSync(result2.certPath).mtimeMs).toBe(certMtime);
 
     // Cleanup
     rmSync(dir, { recursive: true, force: true });
