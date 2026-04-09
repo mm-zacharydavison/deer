@@ -4,8 +4,9 @@ import { connect as netConnect, type Socket } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
-import { unlinkSync } from "node:fs";
+import { unlinkSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
+import { ensureCACert } from "../packages/deerbox/src/sandbox/auth-proxy";
 
 const AUTH_PROXY_SCRIPT = join(import.meta.dir, "..", "packages", "deerbox", "src", "sandbox", "auth-proxy-server.mjs");
 
@@ -376,5 +377,27 @@ describe("auth-proxy-server", () => {
 
     // Cleanup
     try { unlinkSync(tokenPath); } catch {}
+  });
+});
+
+describe("CA certificate", () => {
+  test("ensureCACert generates cert and key files", async () => {
+    const dir = join(tmpdir(), `deer-ca-test-${randomBytes(4).toString("hex")}`);
+    const result = ensureCACert(dir);
+    expect(result.certPath).toBe(join(dir, "deer-ca.crt"));
+    expect(result.keyPath).toBe(join(dir, "deer-ca.key"));
+    expect(existsSync(result.certPath)).toBe(true);
+    expect(existsSync(result.keyPath)).toBe(true);
+
+    // Cert should be valid PEM
+    const certPem = readFileSync(result.certPath, "utf-8");
+    expect(certPem).toContain("-----BEGIN CERTIFICATE-----");
+
+    // Calling again should return same paths without regenerating
+    const result2 = ensureCACert(dir);
+    expect(result2.certPath).toBe(result.certPath);
+
+    // Cleanup
+    rmSync(dir, { recursive: true, force: true });
   });
 });

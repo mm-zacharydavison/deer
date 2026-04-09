@@ -9,7 +9,7 @@
  * (used by `deerbox prepare` so deer can manage the proxy lifecycle).
  */
 
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { join } from "node:path";
 import { mkdirSync, writeFileSync, existsSync, openSync, unlinkSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -74,6 +74,41 @@ function ensureServerScript(): string {
   writeFileSync(scriptPath, authProxySource, "utf-8");
 
   return scriptPath;
+}
+
+export interface CACert {
+  certPath: string;
+  keyPath: string;
+}
+
+/**
+ * Ensure a deer CA certificate exists for TLS MITM proxying.
+ * Generates a self-signed CA cert and key using system openssl if they
+ * don't already exist. The CA cert is injected into the sandbox so
+ * sandboxed processes trust the proxy's per-domain certificates.
+ *
+ * @param dir - Directory to store the CA cert and key (e.g. deer data dir)
+ */
+export function ensureCACert(dir: string): CACert {
+  const certPath = join(dir, "deer-ca.crt");
+  const keyPath = join(dir, "deer-ca.key");
+
+  if (existsSync(certPath) && existsSync(keyPath)) {
+    return { certPath, keyPath };
+  }
+
+  mkdirSync(dir, { recursive: true });
+
+  execSync(
+    `openssl req -x509 -new -nodes -newkey rsa:2048 ` +
+    `-keyout ${JSON.stringify(keyPath)} ` +
+    `-sha256 -days 3650 ` +
+    `-out ${JSON.stringify(certPath)} ` +
+    `-subj "/CN=Deer Auth Proxy CA"`,
+    { stdio: "ignore" },
+  );
+
+  return { certPath, keyPath };
 }
 
 /**
