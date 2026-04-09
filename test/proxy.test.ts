@@ -53,8 +53,10 @@ describe("resolveProxyUpstreams", () => {
     expect(claudeAiUpstream).toBeDefined();
     expect(claudeAiUpstream?.headers.authorization).toBe("Bearer real-oauth-token");
 
-    // api.anthropic.com sandboxEnv sets ANTHROPIC_BASE_URL
-    expect(sandboxEnv.ANTHROPIC_BASE_URL).toBe("http://api.anthropic.com");
+    // OAuth mode must NOT set ANTHROPIC_BASE_URL — that forces "Claude API" display.
+    // Claude Code uses https://api.anthropic.com directly; SRT routes it through
+    // the MITM proxy via HTTPS CONNECT tunneling (same as claude.ai).
+    expect(sandboxEnv.ANTHROPIC_BASE_URL).toBeUndefined();
   });
 
   test("ANTHROPIC_API_KEY only creates upstream for api.anthropic.com, not claude.ai", () => {

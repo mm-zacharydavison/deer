@@ -106,14 +106,15 @@ export const DEFAULT_CONFIG: DeerConfig = {
     envPassthrough: [],
     proxyCredentials: [
       {
+        // No sandboxEnv — Claude Code uses https://api.anthropic.com directly.
+        // SRT routes HTTPS traffic through the MITM proxy via CONNECT tunneling,
+        // so no ANTHROPIC_BASE_URL override is needed (and setting it would force
+        // Claude Code into "Claude API" display mode instead of showing the actual
+        // subscription type).
         domain: "api.anthropic.com",
         target: "https://api.anthropic.com",
         hostEnv: { key: "CLAUDE_CODE_OAUTH_TOKEN" },
         headerTemplate: { authorization: "Bearer ${value}" },
-        sandboxEnv: {
-          key: "ANTHROPIC_BASE_URL",
-          value: "http://api.anthropic.com",
-        },
       },
       {
         domain: "api.anthropic.com",
