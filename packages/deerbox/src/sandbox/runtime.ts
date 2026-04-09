@@ -44,6 +44,12 @@ export interface SandboxRuntimeOptions {
    * @example "/home/user/.local/share/deer/tasks/deer_abc123/claude-config"
    */
   claudeConfigDir?: string;
+  /**
+   * Path to the deer CA certificate for TLS MITM proxying.
+   * When set, injected as NODE_EXTRA_CA_CERTS and GIT_SSL_CAINFO
+   * so sandboxed processes trust the auth proxy's per-domain certs.
+   */
+  caCertPath?: string;
 }
 
 /** Cleanup function returned by prepare() to tear down runtime resources */

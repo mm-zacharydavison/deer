@@ -222,6 +222,7 @@ function buildSrtSettings(options: SandboxRuntimeOptions, srtBinDir: string | nu
     ...(srtBinDir ? [srtBinDir] : []),
     ...(options.extraReadPaths ?? []),
     ...resolveSymlinkTargets(claudeConfigDir),
+    ...(options.caCertPath ? [options.caCertPath] : []),
   ];
 
   // Deny read access to all home entries except required roots.
@@ -332,6 +333,11 @@ export function createSrtRuntime(opts?: { home?: string }): SandboxRuntime {
       overlay.PATH = process.env.PATH ?? "/usr/bin:/bin:/usr/local/bin";
       overlay.TERM = process.env.TERM ?? "xterm-256color";
       Object.assign(overlay, env ?? {});
+
+      if (options.caCertPath) {
+        overlay.NODE_EXTRA_CA_CERTS = options.caCertPath;
+        overlay.GIT_SSL_CAINFO = options.caCertPath;
+      }
 
       // Vars to explicitly remove from the sandbox environment.
       // CLAUDECODE must never be set (prevents nested deer detection).

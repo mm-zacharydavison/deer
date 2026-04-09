@@ -16,7 +16,7 @@ import { resolveRuntime } from "./sandbox/resolve";
 import { detectLang, HOME, DEFAULT_MODEL, loadEnvPolicy } from "@deer/shared";
 import { applyEcosystems } from "./ecosystems";
 import { resolveProxyUpstreams } from "./proxy";
-import { startAuthProxy, type AuthProxy } from "./sandbox/auth-proxy";
+import { startAuthProxy, ensureCACert, type AuthProxy } from "./sandbox/auth-proxy";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -296,6 +296,9 @@ export async function prepare(options: PrepareOptions): Promise<PreparedSession>
 
   onStatus?.("Starting sandbox...");
 
+  // Generate CA cert for TLS MITM proxying (idempotent — reuses existing cert)
+  const caCert = ensureCACert(join(dataDir(), "tls"));
+
   // Resolve credentials → MITM proxy
   const { upstreams, sandboxEnv, placeholderEnv } =
     resolveProxyUpstreams(config.sandbox.proxyCredentials);
@@ -329,7 +332,7 @@ export async function prepare(options: PrepareOptions): Promise<PreparedSession>
     // The task dir path can be long, so we use "proxy.sock" instead of
     // repeating the taskId (which is already in the directory path).
     const socketPath = join(dirname(worktreePath), "proxy.sock");
-    authProxy = await startAuthProxy(socketPath, upstreams, onProxyLog, daemonize);
+    authProxy = await startAuthProxy(socketPath, upstreams, onProxyLog, daemonize, caCert);
     mitmProxy = { socketPath: authProxy.socketPath, domains: authProxy.domains };
   }
 
@@ -357,6 +360,7 @@ export async function prepare(options: PrepareOptions): Promise<PreparedSession>
     mitmProxy,
     claudeConfigDir,
     envBlocklist: envPolicy.blocked,
+    caCertPath: caCert.certPath,
   };
 
   try {
