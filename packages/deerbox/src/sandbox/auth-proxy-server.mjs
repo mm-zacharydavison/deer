@@ -11,7 +11,7 @@
 import { createServer, request as httpRequest, Agent as HttpAgent } from "node:http";
 import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
 import { TLSSocket } from "node:tls";
-import { unlinkSync } from "node:fs";
+import { unlinkSync, appendFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
@@ -118,8 +118,12 @@ function getTlsCertForDomain(domain) {
   }
 }
 
+const logFilePath = socketPath + ".log";
 let stdoutBroken = false;
 function log(message) {
+  const timestamp = new Date().toISOString();
+  const line = `${timestamp} ${message}`;
+  try { appendFileSync(logFilePath, line + "\n"); } catch { /* ignore */ }
   if (stdoutBroken) return;
   try {
     process.stdout.write(JSON.stringify({ log: message }) + "\n");
