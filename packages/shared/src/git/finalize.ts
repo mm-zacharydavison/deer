@@ -610,6 +610,12 @@ export interface MergeIntoLocalBranchOptions {
   baseBranch: string;
   targetBranch: string;
   prompt: string | null;
+  /**
+   * Additional content to append to the system prompt used when Claude generates
+   * PR metadata. Used by --from strategies to influence the commit message
+   * (e.g. instructing Claude to include "Closes https://..." for issue strategies).
+   */
+  appendPRSystemPrompt?: string;
   onLog?: (message: string) => void;
 }
 
@@ -621,7 +627,7 @@ export interface MergeIntoLocalBranchOptions {
  * into targetBranch with --no-ff.
  */
 export async function mergeIntoLocalBranch(options: MergeIntoLocalBranchOptions): Promise<void> {
-  const { repoPath, worktreePath, branch, baseBranch, targetBranch, prompt, onLog } = options;
+  const { repoPath, worktreePath, branch, baseBranch, targetBranch, prompt, appendPRSystemPrompt, onLog } = options;
   const log = onLog ?? (() => {});
 
   // Stage and commit all changes with a placeholder message (same as PR flow)
@@ -630,7 +636,7 @@ export async function mergeIntoLocalBranch(options: MergeIntoLocalBranchOptions)
 
   // Generate metadata via Claude for a proper commit message
   log(`[merge] Generating commit message via Claude...`);
-  const metadata = await generatePRMetadata(worktreePath, baseBranch, prompt, null, undefined, onLog);
+  const metadata = await generatePRMetadata(worktreePath, baseBranch, prompt, null, appendPRSystemPrompt, onLog);
   log(`[merge] Commit message: ${metadata.title}`);
 
   // Amend the placeholder commit with the real title

@@ -226,6 +226,7 @@ export async function runPostSession(
         baseBranch: ctx.baseBranch,
         targetBranch: ctx.originalBranch,
         prompt: ctx.prompt,
+        appendPRSystemPrompt: ctx.appendPRSystemPrompt,
         onLog: (msg) => deps.log(`  ${msg}`),
       });
       deps.log(`\n${green("Merged into")} ${ctx.originalBranch}`);
