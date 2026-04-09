@@ -94,13 +94,18 @@ describe("credential proxy resolution", () => {
       const { upstreams, sandboxEnv, placeholderEnv } = resolveProxyUpstreams(
         DEFAULT_CONFIG.sandbox.proxyCredentials,
       );
-      // Only one upstream should be created (OAuth wins, same domain)
-      expect(upstreams).toHaveLength(1);
-      expect(upstreams[0].headers["authorization"]).toBe("Bearer oauth-tok-test");
-      expect(upstreams[0].headers["x-api-key"]).toBeUndefined();
-      expect(upstreams[0].domain).toBe("api.anthropic.com");
-      // Sandbox gets HTTP base URL (not HTTPS — goes through SRT proxy)
-      expect(sandboxEnv.ANTHROPIC_BASE_URL).toBe("http://api.anthropic.com");
+      // Two upstreams: api.anthropic.com and claude.ai (both use OAuth)
+      // api.anthropic.com wins over ANTHROPIC_API_KEY (same domain, OAuth first)
+      expect(upstreams).toHaveLength(2);
+      const anthropicUpstream = upstreams.find((u) => u.domain === "api.anthropic.com");
+      expect(anthropicUpstream?.headers["authorization"]).toBe("Bearer oauth-tok-test");
+      expect(anthropicUpstream?.headers["x-api-key"]).toBeUndefined();
+      const claudeAiUpstream = upstreams.find((u) => u.domain === "claude.ai");
+      expect(claudeAiUpstream?.headers["authorization"]).toBe("Bearer oauth-tok-test");
+      // OAuth mode must NOT set ANTHROPIC_BASE_URL — Claude Code uses https://api.anthropic.com
+      // directly; SRT routes HTTPS traffic through the MITM proxy via CONNECT tunneling.
+      // Setting ANTHROPIC_BASE_URL would force "Claude API" display mode.
+      expect(sandboxEnv.ANTHROPIC_BASE_URL).toBeUndefined();
       // Sandbox gets placeholder CLAUDE_CODE_OAUTH_TOKEN (not the real value)
       expect(placeholderEnv.CLAUDE_CODE_OAUTH_TOKEN).toBe("proxy-managed");
       // ANTHROPIC_API_KEY placeholder must NOT be set (OAuth won)

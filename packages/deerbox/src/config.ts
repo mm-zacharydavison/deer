@@ -27,8 +27,12 @@ export interface ProxyCredential {
    *
    * Additionally, `hostEnv.key` is injected into the sandbox as
    * `"proxy-managed"` so the sandboxed tool thinks it has credentials.
+   *
+   * Omit for domains where no env var override is needed — e.g. when SRT
+   * routes HTTPS traffic through the MITM proxy via CONNECT tunneling and
+   * the sandboxed tool uses the domain's standard HTTPS URL directly.
    */
-  sandboxEnv: {
+  sandboxEnv?: {
     key: string;
     value: string;
   };
@@ -102,14 +106,15 @@ export const DEFAULT_CONFIG: DeerConfig = {
     envPassthrough: [],
     proxyCredentials: [
       {
+        // No sandboxEnv — Claude Code uses https://api.anthropic.com directly.
+        // SRT routes HTTPS traffic through the MITM proxy via CONNECT tunneling,
+        // so no ANTHROPIC_BASE_URL override is needed (and setting it would force
+        // Claude Code into "Claude API" display mode instead of showing the actual
+        // subscription type).
         domain: "api.anthropic.com",
         target: "https://api.anthropic.com",
         hostEnv: { key: "CLAUDE_CODE_OAUTH_TOKEN" },
         headerTemplate: { authorization: "Bearer ${value}" },
-        sandboxEnv: {
-          key: "ANTHROPIC_BASE_URL",
-          value: "http://api.anthropic.com",
-        },
       },
       {
         domain: "api.anthropic.com",
@@ -120,6 +125,16 @@ export const DEFAULT_CONFIG: DeerConfig = {
           key: "ANTHROPIC_BASE_URL",
           value: "http://api.anthropic.com",
         },
+      },
+      {
+        // claude.ai is used by Claude Code to validate OAuth tokens and detect
+        // subscription type (Claude Max vs API). No sandboxEnv needed — SRT routes
+        // HTTPS traffic through the MITM proxy via CONNECT tunneling, so Claude Code
+        // can use https://claude.ai directly and get real auth headers injected.
+        domain: "claude.ai",
+        target: "https://claude.ai",
+        hostEnv: { key: "CLAUDE_CODE_OAUTH_TOKEN" },
+        headerTemplate: { authorization: "Bearer ${value}" },
       },
     ],
   },
