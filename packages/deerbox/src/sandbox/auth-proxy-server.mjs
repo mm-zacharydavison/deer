@@ -10,6 +10,7 @@
 
 import { createServer, request as httpRequest, Agent as HttpAgent } from "node:http";
 import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
+import { TLSSocket } from "node:tls";
 import { unlinkSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -75,6 +76,38 @@ const socketPath = process.argv[2];
 const upstreams = JSON.parse(process.argv[3]);
 const caCertPath = process.argv[4] || null;
 const caKeyPath = process.argv[5] || null;
+
+/** Per-domain TLS cert cache: domain -> { cert, key } PEM strings */
+const tlsCertCache = new Map();
+
+/**
+ * Generate a TLS certificate for the given domain, signed by the deer CA.
+ * Caches results in memory so each domain only generates once per proxy lifetime.
+ */
+function getTlsCertForDomain(domain) {
+  if (tlsCertCache.has(domain)) return tlsCertCache.get(domain);
+  if (!caCertPath || !caKeyPath) return null;
+
+  try {
+    const key = execSync(
+      "openssl genrsa 2048 2>/dev/null",
+      { encoding: "utf-8" },
+    );
+    const cert = execSync(
+      `openssl req -new -key /dev/stdin -subj "/CN=${domain}" 2>/dev/null | ` +
+      `openssl x509 -req -CA ${JSON.stringify(caCertPath)} -CAkey ${JSON.stringify(caKeyPath)} ` +
+      `-CAcreateserial -days 365 -sha256 ` +
+      `-extfile <(echo "subjectAltName=DNS:${domain}") 2>/dev/null`,
+      { input: key, encoding: "utf-8", shell: "/bin/bash" },
+    );
+    const entry = { cert, key };
+    tlsCertCache.set(domain, entry);
+    return entry;
+  } catch (err) {
+    log(`[proxy] failed to generate TLS cert for ${domain}: ${err.message}`);
+    return null;
+  }
+}
 
 let stdoutBroken = false;
 function log(message) {
@@ -217,8 +250,16 @@ function handleRequest(req, res) {
   try {
     parsedUrl = new URL(rawUrl);
   } catch {
-    if (upstreams.length > 0) {
-      forwardToUpstream(upstreams[0], rawUrl, method, req.headers, res, req, false);
+    // Relative URL — this happens for requests arriving through a CONNECT
+    // tunnel (TLS-terminated). Resolve the upstream from the Host header.
+    const hostHeader = req.headers.host;
+    const hostDomain = hostHeader ? hostHeader.split(":")[0] : null;
+    const hostUpstream = hostDomain
+      ? upstreams.find((u) => u.domain === hostDomain)
+      : null;
+    const fallbackUpstream = hostUpstream ?? upstreams[0];
+    if (fallbackUpstream) {
+      forwardToUpstream(fallbackUpstream, rawUrl, method, req.headers, res, req, false);
       return;
     }
     log(`[proxy] 502 invalid URL ${rawUrl}`);
@@ -262,6 +303,46 @@ const server = createServer((req, res) => {
       res.end(`auth-proxy: internal error: ${err.message}`);
     }
   }
+});
+
+server.on("connect", (req, clientSocket, head) => {
+  const [hostname] = (req.url ?? "").split(":");
+  if (!hostname) {
+    clientSocket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+    return;
+  }
+
+  const upstream = upstreams.find((u) => u.domain === hostname);
+  if (!upstream) {
+    log(`[proxy] CONNECT 502 no upstream for ${hostname}`);
+    clientSocket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+    return;
+  }
+
+  const domainCert = getTlsCertForDomain(hostname);
+  if (!domainCert) {
+    log(`[proxy] CONNECT 502 no TLS cert for ${hostname}`);
+    clientSocket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+    return;
+  }
+
+  clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+
+  const tlsSocket = new TLSSocket(clientSocket, {
+    isServer: true,
+    cert: domainCert.cert,
+    key: domainCert.key,
+    requestCert: false,
+  });
+
+  tlsSocket.on("secure", () => {
+    server.emit("connection", tlsSocket);
+  });
+
+  tlsSocket.on("error", (err) => {
+    log(`[proxy] CONNECT TLS error for ${hostname}: ${err.message}`);
+    clientSocket.destroy();
+  });
 });
 
 // Prevent EPIPE crashes when parent disconnects stdout (daemonized mode)

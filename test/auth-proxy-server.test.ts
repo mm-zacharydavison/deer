@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { unlinkSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
+import { connect as tlsConnect } from "node:tls";
 import { ensureCACert } from "../packages/deerbox/src/sandbox/auth-proxy";
 
 const AUTH_PROXY_SCRIPT = join(import.meta.dir, "..", "packages", "deerbox", "src", "sandbox", "auth-proxy-server.mjs");
@@ -27,9 +28,17 @@ function startMockUpstream(handler: (req: IncomingMessage, res: ServerResponse) 
 /**
  * Start the auth proxy on a Unix socket with given upstream config.
  */
-function startAuthProxy(socketPath: string, upstreams: unknown[]): Promise<{ proc: ChildProcess }> {
+function startAuthProxy(
+  socketPath: string,
+  upstreams: unknown[],
+  ca?: { certPath: string; keyPath: string },
+): Promise<{ proc: ChildProcess }> {
   return new Promise((resolve, reject) => {
-    const proc = spawn("node", [AUTH_PROXY_SCRIPT, socketPath, JSON.stringify(upstreams)], {
+    const args = [AUTH_PROXY_SCRIPT, socketPath, JSON.stringify(upstreams)];
+    if (ca) {
+      args.push(ca.certPath, ca.keyPath);
+    }
+    const proc = spawn("node", args, {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -105,6 +114,7 @@ describe("auth-proxy-server", () => {
   const procs: ChildProcess[] = [];
   const servers: Server[] = [];
   const sockets: string[] = [];
+  const tempDirs: string[] = [];
 
   afterAll(() => {
     for (const p of procs) p.kill("SIGTERM");
@@ -112,6 +122,7 @@ describe("auth-proxy-server", () => {
     for (const sock of sockets) {
       try { unlinkSync(sock); } catch {}
     }
+    for (const d of tempDirs) { try { rmSync(d, { recursive: true, force: true }); } catch {} }
   });
 
   test("streams request body to upstream without full buffering", async () => {
@@ -377,6 +388,101 @@ describe("auth-proxy-server", () => {
 
     // Cleanup
     try { unlinkSync(tokenPath); } catch {}
+  });
+
+  test("handles CONNECT with TLS termination and header injection", async () => {
+    let receivedHeaders: Record<string, string | string[] | undefined> = {};
+    let receivedBody = "";
+
+    const { server, port } = await startMockUpstream((req, res) => {
+      receivedHeaders = req.headers;
+      let body = "";
+      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      req.on("end", () => {
+        receivedBody = body;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      });
+    });
+    servers.push(server);
+
+    const caDir = join(tmpdir(), `deer-ca-test-${randomBytes(4).toString("hex")}`);
+    tempDirs.push(caDir);
+    const ca = ensureCACert(caDir);
+
+    const socketPath = join(tmpdir(), `auth-proxy-test-${randomBytes(4).toString("hex")}.sock`);
+    sockets.push(socketPath);
+
+    const upstreams = [
+      {
+        domain: "tls-test.local",
+        target: `http://127.0.0.1:${port}`,
+        headers: { authorization: "Bearer secret-tls-token" },
+      },
+    ];
+
+    const { proc } = await startAuthProxy(socketPath, upstreams, ca);
+    procs.push(proc);
+
+    const result = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const rawSocket: Socket = netConnect({ path: socketPath }, () => {
+        rawSocket.write(
+          "CONNECT tls-test.local:443 HTTP/1.1\r\n" +
+          "Host: tls-test.local:443\r\n" +
+          "\r\n",
+        );
+      });
+
+      let connectResponse = "";
+      const onData = (chunk: Buffer) => {
+        connectResponse += chunk.toString();
+        if (connectResponse.includes("\r\n\r\n")) {
+          rawSocket.removeListener("data", onData);
+
+          if (!connectResponse.includes("200")) {
+            reject(new Error(`CONNECT failed: ${connectResponse}`));
+            return;
+          }
+
+          const tlsSocket = tlsConnect({
+            socket: rawSocket,
+            ca: readFileSync(ca.certPath),
+            servername: "tls-test.local",
+          });
+
+          tlsSocket.on("secureConnect", () => {
+            const body = '{"prompt":"hello via TLS"}';
+            tlsSocket.write(
+              `POST /v1/messages HTTP/1.1\r\n` +
+              `Host: tls-test.local\r\n` +
+              `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+              `Content-Type: application/json\r\n` +
+              `Connection: close\r\n` +
+              `\r\n` +
+              body,
+            );
+          });
+
+          let buf = "";
+          tlsSocket.on("data", (d: Buffer) => { buf += d.toString(); });
+          tlsSocket.on("end", () => {
+            const headerEnd = buf.indexOf("\r\n\r\n");
+            if (headerEnd === -1) { reject(new Error("malformed")); return; }
+            const statusLine = buf.slice(0, buf.indexOf("\r\n"));
+            const status = parseInt(statusLine.split(" ")[1], 10);
+            const responseBody = buf.slice(headerEnd + 4);
+            resolve({ status, body: responseBody });
+          });
+          tlsSocket.on("error", reject);
+        }
+      };
+      rawSocket.on("data", onData);
+      rawSocket.on("error", reject);
+    });
+
+    expect(result.status).toBe(200);
+    expect(receivedHeaders.authorization).toBe("Bearer secret-tls-token");
+    expect(receivedBody).toBe('{"prompt":"hello via TLS"}');
   });
 });
 
