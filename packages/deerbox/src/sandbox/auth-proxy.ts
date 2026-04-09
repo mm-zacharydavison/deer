@@ -191,6 +191,10 @@ export async function startAuthProxy(
     stdio: ["ignore", "pipe", "pipe"],
   });
 
+  // Write PID file even in non-daemonized mode so prune can detect
+  // that this task is still alive (interactive deerbox has no tmux session).
+  writeFileSync(pidFilePath, String(child.pid));
+
   child.stderr?.on("data", (data: Buffer) => {
     onLog?.(`[proxy:stderr] ${data.toString().trim()}`);
   });
@@ -242,6 +246,7 @@ export async function startAuthProxy(
           });
         });
       }
+      try { unlinkSync(pidFilePath); } catch { /* ignore */ }
     },
   };
 }

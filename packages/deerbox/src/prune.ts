@@ -1,5 +1,6 @@
 import { join, dirname, isAbsolute, basename } from "node:path";
 import { readdir } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import { dataDir } from "./task";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -127,6 +128,22 @@ async function killTmuxSessions(opts: PruneOptions): Promise<number> {
   return sessions.length;
 }
 
+/**
+ * Check if the auth proxy for a task is still alive by reading its PID file.
+ */
+function isProxyAlive(taskDir: string): boolean {
+  const pidFile = join(taskDir, "proxy.sock.pid");
+  if (!existsSync(pidFile)) return false;
+  try {
+    const pid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
+    if (isNaN(pid)) return false;
+    process.kill(pid, 0); // signal 0 = check if process exists
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ── Main ─────────────────────────────────────────────────────────────
 
 /**
@@ -169,11 +186,17 @@ export async function prune(opts: PruneOptions = {}): Promise<PruneResult> {
     await Bun.$`rm -rf ${tasksDir}`.quiet().nothrow();
     result.tasksRemoved = taskDirs.length;
   } else {
-    // Normal mode: prune only dangling task dirs (no live tmux session)
+    // Normal mode: prune only dangling task dirs (no live tmux session
+    // and no live auth proxy process)
     for (const taskDir of taskDirs) {
       const taskId = basename(taskDir);
       const sessionAlive = await isTmuxSessionAlive(`deer-${taskId}`);
       if (sessionAlive) continue;
+
+      // Also check if the auth proxy is still alive — when deerbox runs
+      // interactively (no tmux), the proxy PID file is the only signal
+      // that the task is still in use.
+      if (isProxyAlive(taskDir)) continue;
 
       emit(`Pruning dangling task: ${taskId}`, opts);
 
