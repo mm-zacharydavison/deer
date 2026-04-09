@@ -88,6 +88,12 @@ function getTlsCertForDomain(domain) {
   if (tlsCertCache.has(domain)) return tlsCertCache.get(domain);
   if (!caCertPath || !caKeyPath) return null;
 
+  // Guard: only allow safe hostname characters to reach the shell command.
+  if (!/^[a-zA-Z0-9._-]+$/.test(domain)) {
+    log(`[proxy] rejected unsafe domain for cert generation: ${domain}`);
+    return null;
+  }
+
   try {
     const key = execSync(
       "openssl genrsa 2048 2>/dev/null",
@@ -259,6 +265,18 @@ function handleRequest(req, res) {
       : null;
     const fallbackUpstream = hostUpstream ?? upstreams[0];
     if (fallbackUpstream) {
+      if (fallbackUpstream.allowedPaths?.length) {
+        const reqPath = rawUrl.split("?")[0];
+        const allowed = fallbackUpstream.allowedPaths.some(
+          (pattern) => new RegExp(pattern).test(reqPath),
+        );
+        if (!allowed) {
+          log(`[proxy] 403 blocked path ${method} ${fallbackUpstream.domain}${reqPath}`);
+          res.writeHead(403, { "content-type": "text/plain" });
+          res.end("auth-proxy: path not allowed");
+          return;
+        }
+      }
       forwardToUpstream(fallbackUpstream, rawUrl, method, req.headers, res, req, false);
       return;
     }
