@@ -75,7 +75,7 @@ export async function launchSandbox(options: LaunchOptions): Promise<SandboxSess
     "tmux", "new-session", "-d", "-s", sessionName,
     "-x", String(process.stdout.columns || 220), "-y", String(process.stdout.rows || 50),
     "sh", "-c", preamble,
-  ], { stdout: "pipe", stderr: "pipe" });
+  ], { stdout: "pipe", stderr: "pipe", cwd: worktreePath });
   const createCode = await createProc.exited;
   if (createCode !== 0) {
     const stderr = await new Response(createProc.stderr).text();
