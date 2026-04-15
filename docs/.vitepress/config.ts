@@ -13,6 +13,12 @@ export default defineConfig({
     theme: "github-light",
   },
 
+  vite: {
+    ssr: {
+      noExternal: ["vitepress-theme-zac"],
+    },
+  },
+
   themeConfig: {
     nav: [
       { text: "Guide", link: "/getting-started/" },
