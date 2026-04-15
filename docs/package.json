@@ -8,5 +8,8 @@
   },
   "devDependencies": {
     "vitepress": "^1.6.3"
+  },
+  "dependencies": {
+    "vitepress-theme-zac": "^0.1.1"
   }
 }

@@ -9,6 +9,10 @@ export default defineConfig({
 
   head: [["link", { rel: "icon", href: "/deer/favicon.ico" }]],
 
+  markdown: {
+    theme: "github-light",
+  },
+
   themeConfig: {
     nav: [
       { text: "Guide", link: "/getting-started/" },
