@@ -82,6 +82,7 @@ jobs:
       - name: Ad-hoc codesign macOS binaries
         run: |
           for bin in dist/*-darwin-*; do
+            codesign --remove-signature "$bin"
             codesign --force --sign - "$bin"
           done
 
