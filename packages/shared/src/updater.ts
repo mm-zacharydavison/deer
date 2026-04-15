@@ -99,6 +99,10 @@ export async function checkAndUpdate({ name, version }: UpdateOptions): Promise<
   try {
     await Bun.write(tmpPath, data);
     await Bun.$`chmod +x ${tmpPath}`.quiet();
+    // macOS requires ad-hoc codesigning for binaries to execute
+    if (process.platform === "darwin") {
+      await Bun.$`codesign --force --sign - ${tmpPath}`.quiet();
+    }
     await Bun.$`mv ${tmpPath} ${currentPath}`.quiet();
   } catch {
     await Bun.$`rm -f ${tmpPath}`.quiet();
