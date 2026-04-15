@@ -297,7 +297,36 @@ async function cmdRun(prompt: string | undefined, args: string[], continueMode: 
     cwd: session.worktreePath,
   });
 
+  // Handle Ctrl+C: clean up the session before exiting so the SRT process
+  // runs cleanupBwrapMountPoints() and ghost files don't linger.
+  const sigintHandler = () => {
+    proc.kill("SIGINT");
+  };
+  process.on("SIGINT", sigintHandler);
+
   const exitCode = await proc.exited;
+
+  process.off("SIGINT", sigintHandler);
+
+  // Remove any ghost files left by SRT's bwrap mount-point creation.
+  // bwrap creates empty files for DANGEROUS_FILES relative to the CWD
+  // as bind-mount targets. If cleanup doesn't run (SIGKILL, crash),
+  // these persist as empty untracked files.
+  const SRT_GHOST_FILES = [
+    ".gitconfig", ".gitmodules", ".bashrc", ".bash_profile",
+    ".zshrc", ".zprofile", ".profile", ".ripgreprc", ".mcp.json",
+  ];
+  for (const dir of [session.worktreePath, repoPath]) {
+    for (const name of SRT_GHOST_FILES) {
+      const ghost = join(dir, name);
+      try {
+        const file = Bun.file(ghost);
+        if (await file.exists() && (await file.size) === 0) {
+          await Bun.$`rm -f ${ghost}`.quiet().nothrow();
+        }
+      } catch { /* ignore */ }
+    }
+  }
 
   if (keep) {
     await session.cleanup();

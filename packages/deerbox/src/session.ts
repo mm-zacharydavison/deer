@@ -223,7 +223,7 @@ export async function prepare(options: PrepareOptions): Promise<PreparedSession>
 
   let worktreePath: string;
   let branch: string;
-  let ecosystemResult = { extraReadPaths: [] as string[], env: {} as Record<string, string> };
+  let ecosystemResult = { extraReadPaths: [] as string[], extraWritePaths: [] as string[], env: {} as Record<string, string> };
 
   if (continueSession) {
     worktreePath = continueSession.worktreePath;
@@ -384,7 +384,7 @@ export async function prepare(options: PrepareOptions): Promise<PreparedSession>
     repoGitDir: reuseWorktree?.repoGitDir ?? resolve(repoPath, ".git"),
     allowlist: config.network.allowlist,
     extraReadPaths: ecosystemResult.extraReadPaths,
-    extraWritePaths: extraWritePaths.length > 0 ? extraWritePaths : undefined,
+    extraWritePaths: [...ecosystemResult.extraWritePaths, ...extraWritePaths],
     env: { ...ecosystemResult.env, ...sandboxEnvFinal },
     mitmProxy,
     claudeConfigDir,

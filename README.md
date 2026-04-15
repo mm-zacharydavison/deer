@@ -4,6 +4,8 @@
 
 If you want to parallelize `claude` agents, but don't like the complexity of agent orchestrators like [`multiclaude`](https://github.com/dlorenc/multiclaude) and [`claude-squad`](https://github.com/smtg-ai/claude-squad), `deer` may be for you.
 
+**[Read the full documentation →](https://zdavison.github.io/deer/)**
+
 ![the deer dashboard TUI](assets/demo-dashboard.png)
 
 ## Screencast

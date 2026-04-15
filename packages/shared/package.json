@@ -1,6 +1,6 @@
 {
   "name": "@deer/shared",
-  "version": "0.8.1",
+  "version": "0.9.4",
   "private": true,
   "type": "module",
   "exports": {
