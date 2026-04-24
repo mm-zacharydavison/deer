@@ -214,7 +214,7 @@ The dashboard UI and generated PR content can be displayed in multiple languages
 
 | Language | `--lang=` value | LLM-translated |
 |----------|----------------|:--------------:|
-| English | *(default)* | |
+| English | `en` *(default)* | |
 | Japanese (日本語) | `ja` | ✓ |
 | Chinese Simplified (简体中文) | `zh` | ✓ |
 | Korean (한국어) | `ko` | ✓ |
@@ -224,9 +224,15 @@ The dashboard UI and generated PR content can be displayed in multiple languages
 deer --lang=zh
 ```
 
+To force English on a machine whose system locale resolves to another language, pass `--lang=en` explicitly:
+
+```sh
+deer --lang=en
+```
+
 Language is detected in this order (first match wins):
 
-1. `--lang=<code>` CLI flag
+1. `--lang=<code>` CLI flag — **overrides all other sources, including system locale**
 2. `CLAUDE_CODE_LOCALE` environment variable (e.g. `CLAUDE_CODE_LOCALE=zh`)
 3. System `LANG` environment variable (e.g. `LANG=zh_CN.UTF-8`)
 4. Default: English

@@ -39,6 +39,7 @@ export function detectLang(): Lang {
   const langArg = process.argv.find((a) => a.startsWith("--lang="));
   if (langArg) {
     const val = langArg.split("=")[1]?.toLowerCase();
+    if (val === "en") return "en";
     if (val === "jp" || val === "ja") return "ja";
     if (val === "zh" || val === "zh-cn" || val === "zh_cn") return "zh";
     if (val === "ko") return "ko";
