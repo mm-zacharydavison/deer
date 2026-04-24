@@ -137,5 +137,6 @@ Review and update the environment variable policy. Opens an interactive prompt t
 
 | Flag | Description |
 |------|-------------|
+| `--lang <code>` | UI language: `en`, `ja`, `zh`, `ko`, `ru`. Overrides `CLAUDE_CODE_LOCALE` and system `LANG`. |
 | `-h, --help` | Show help |
 | `-v, --version` | Show version |
