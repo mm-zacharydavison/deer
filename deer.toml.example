@@ -7,6 +7,11 @@
 # Command to run inside the worktree before the agent starts (e.g. install deps).
 # setup_command = "pnpm install"
 
+# Permission mode Claude Code uses inside the sandbox.
+#   "auto"              — classifier-based auto mode (safer, the default)
+#   "bypassPermissions" — skip all permission checks (--dangerously-skip-permissions)
+# permission_mode = "auto"
+
 # Extend the network allowlist for this repo (merged with the global allowlist).
 # [network]
 # allowlist_extra = ["npm.pkg.github.com", "your-registry.example.com"]
