@@ -156,7 +156,11 @@ export async function startAgent(options: AgentRunOptions): Promise<AgentHandle>
     throw err;
   }
 
-  await dismissBypassDialog(sessionName);
+  // Only bypassPermissions mode shows the startup acceptance dialog; auto mode
+  // has none, so don't poll or send stray keystrokes there.
+  if (options.config?.defaults.permissionMode === "bypassPermissions") {
+    await dismissBypassDialog(sessionName);
+  }
 
   onStatus?.({ phase: "running", sessionName });
 
