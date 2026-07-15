@@ -326,7 +326,9 @@ function tomlToConfig(toml: Record<string, unknown>): Partial<DeerConfig> {
       ...(defaults.timeout_ms !== undefined && { timeoutMs: defaults.timeout_ms }),
       ...(defaults.base_branch !== undefined && { baseBranch: defaults.base_branch }),
       ...(defaults.setup_command !== undefined && { setupCommand: defaults.setup_command }),
-      ...(defaults.permission_mode !== undefined && { permissionMode: defaults.permission_mode }),
+      ...((defaults.permission_mode === "auto" || defaults.permission_mode === "bypassPermissions") && {
+        permissionMode: defaults.permission_mode,
+      }),
     };
   }
 

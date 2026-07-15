@@ -161,6 +161,17 @@ base_branch = "main"
     const config = await loadConfig(tmpDir);
     expect(config.defaults.permissionMode).toBe("auto");
   });
+
+  test("invalid global permission_mode is ignored (falls through to default)", async () => {
+    const globalDir = await mkdtemp(join(tmpdir(), "deer-global-"));
+    const globalPath = join(globalDir, "config.toml");
+    await Bun.write(globalPath, `[defaults]\npermission_mode = "bypasspermissions"\n`);
+
+    const config = await loadConfig(tmpDir, undefined, globalPath);
+    expect(config.defaults.permissionMode).toBe("auto");
+
+    await rm(globalDir, { recursive: true, force: true });
+  });
 });
 
 describe("DEFAULT_CONFIG", () => {
