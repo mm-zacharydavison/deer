@@ -127,6 +127,51 @@ base_branch = "main"
 
     expect(loadConfig(tmpDir)).rejects.toThrow();
   });
+
+  test("permissionMode defaults to auto when no config files are present", async () => {
+    const config = await loadConfig(tmpDir);
+    expect(config.defaults.permissionMode).toBe("auto");
+  });
+
+  test("global config.toml permission_mode overrides the default", async () => {
+    const globalDir = await mkdtemp(join(tmpdir(), "deer-global-"));
+    const globalPath = join(globalDir, "config.toml");
+    await Bun.write(globalPath, `[defaults]\npermission_mode = "bypassPermissions"\n`);
+
+    const config = await loadConfig(tmpDir, undefined, globalPath);
+    expect(config.defaults.permissionMode).toBe("bypassPermissions");
+
+    await rm(globalDir, { recursive: true, force: true });
+  });
+
+  test("repo-local deer.toml permission_mode overrides global", async () => {
+    const globalDir = await mkdtemp(join(tmpdir(), "deer-global-"));
+    const globalPath = join(globalDir, "config.toml");
+    await Bun.write(globalPath, `[defaults]\npermission_mode = "auto"\n`);
+    await Bun.write(join(tmpDir, "deer.toml"), `permission_mode = "bypassPermissions"\n`);
+
+    const config = await loadConfig(tmpDir, undefined, globalPath);
+    expect(config.defaults.permissionMode).toBe("bypassPermissions");
+
+    await rm(globalDir, { recursive: true, force: true });
+  });
+
+  test("unknown repo-local permission_mode is ignored (falls through to merged value)", async () => {
+    await Bun.write(join(tmpDir, "deer.toml"), `permission_mode = "nonsense"\n`);
+    const config = await loadConfig(tmpDir);
+    expect(config.defaults.permissionMode).toBe("auto");
+  });
+
+  test("invalid global permission_mode is ignored (falls through to default)", async () => {
+    const globalDir = await mkdtemp(join(tmpdir(), "deer-global-"));
+    const globalPath = join(globalDir, "config.toml");
+    await Bun.write(globalPath, `[defaults]\npermission_mode = "bypasspermissions"\n`);
+
+    const config = await loadConfig(tmpDir, undefined, globalPath);
+    expect(config.defaults.permissionMode).toBe("auto");
+
+    await rm(globalDir, { recursive: true, force: true });
+  });
 });
 
 describe("DEFAULT_CONFIG", () => {

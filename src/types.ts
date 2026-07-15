@@ -17,6 +17,8 @@ export interface DeerConfig {
     /** @default 1800000 */
     timeoutMs?: number;
     setupCommand?: string;
+    /** @default "auto" */
+    permissionMode?: "auto" | "bypassPermissions";
   };
   network: {
     allowlist: string[];

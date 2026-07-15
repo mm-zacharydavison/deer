@@ -1,5 +1,5 @@
 // Main entrypoint
-export { prepare, taskWorktreePath } from "./session";
+export { prepare, taskWorktreePath, permissionModeArgs } from "./session";
 export type { PrepareOptions, PreparedSession } from "./session";
 
 // Startup

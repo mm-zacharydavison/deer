@@ -149,6 +149,9 @@ deer treats deerbox as a black box — all interaction happens through CLI subco
 3. `<repo>/deer.toml` (repo-local, see `deer.toml.example`)
 4. CLI overrides
 
+Documented keys:
+- `defaults.permission_mode` — `"auto"` (default) or `"bypassPermissions"`; controls the Claude Code permission flag in the sandbox.
+
 ### Security model
 
 - Sandbox gets no host secrets — credentials stay on the host

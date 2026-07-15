@@ -415,11 +415,12 @@ export async function prepare(options: PrepareOptions): Promise<PreparedSession>
   }
 
   const appendSysPromptArgs = appendSystemPrompt ? ["--append-system-prompt", appendSystemPrompt] : [];
+  const permArgs = permissionModeArgs(config);
   const claudeCmd = continueSession
-    ? ["claude", "--dangerously-skip-permissions", "--model", model, "--continue", ...appendSysPromptArgs]
+    ? ["claude", ...permArgs, "--model", model, "--continue", ...appendSysPromptArgs]
     : prompt
-      ? ["claude", "--dangerously-skip-permissions", "--model", model, ...appendSysPromptArgs, prompt]
-      : ["claude", "--dangerously-skip-permissions", "--model", model, ...appendSysPromptArgs];
+      ? ["claude", ...permArgs, "--model", model, ...appendSysPromptArgs, prompt]
+      : ["claude", ...permArgs, "--model", model, ...appendSysPromptArgs];
 
   const command = runtime.buildCommand(runtimeOpts, claudeCmd);
 
@@ -454,4 +455,14 @@ export async function prepare(options: PrepareOptions): Promise<PreparedSession>
  */
 export function taskWorktreePath(repoPath: string, taskId: string): string {
   return join(dataDir(), "tasks", repoSlug(repoPath), taskId, "worktree");
+}
+
+/**
+ * Resolve the Claude Code permission flag for the sandboxed command.
+ * Defaults to auto mode when unset.
+ */
+export function permissionModeArgs(config: DeerConfig): string[] {
+  return config.defaults.permissionMode === "bypassPermissions"
+    ? ["--dangerously-skip-permissions"]
+    : ["--permission-mode", "auto"];
 }

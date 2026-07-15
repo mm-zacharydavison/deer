@@ -47,6 +47,13 @@ export interface DeerConfig {
      */
     timeoutMs?: number;
     setupCommand?: string;
+    /**
+     * How Claude Code handles tool permissions in the sandbox.
+     * - "auto" — classifier-based auto mode (allow/soft-deny/hard-deny); safer default
+     * - "bypassPermissions" — skip all permission checks (--dangerously-skip-permissions)
+     * @default "auto"
+     */
+    permissionMode?: "auto" | "bypassPermissions";
   };
   network: {
     allowlist: string[];
@@ -101,6 +108,7 @@ export const DEFAULT_CONFIG: DeerConfig = {
   defaults: {
     agent: "claude",
     timeoutMs: 1800000,
+    permissionMode: "auto",
   },
   network: {
     allowlist: [
@@ -210,6 +218,12 @@ function applyRepoLocal(config: DeerConfig, repoLocal: Record<string, unknown>):
   if (typeof repoLocal.setup_command === "string") {
     result.defaults.setupCommand = repoLocal.setup_command;
   }
+  if (
+    repoLocal.permission_mode === "auto" ||
+    repoLocal.permission_mode === "bypassPermissions"
+  ) {
+    result.defaults.permissionMode = repoLocal.permission_mode;
+  }
 
   const network = repoLocal.network as Record<string, unknown> | undefined;
   if (network?.allowlist_extra && Array.isArray(network.allowlist_extra)) {
@@ -312,6 +326,9 @@ function tomlToConfig(toml: Record<string, unknown>): Partial<DeerConfig> {
       ...(defaults.timeout_ms !== undefined && { timeoutMs: defaults.timeout_ms }),
       ...(defaults.base_branch !== undefined && { baseBranch: defaults.base_branch }),
       ...(defaults.setup_command !== undefined && { setupCommand: defaults.setup_command }),
+      ...((defaults.permission_mode === "auto" || defaults.permission_mode === "bypassPermissions") && {
+        permissionMode: defaults.permission_mode,
+      }),
     };
   }
 
